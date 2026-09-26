@@ -181,6 +181,8 @@ const PATTERNS = [
       if (!user) return true;
       if (PLACEHOLDER_USERS.has(user)) return true;
       if (/^[<%$[{]/.test(user)) return true; // <you>, %USERNAME%, $USER, [user], {name}
+      if (user.length <= 2) return true; // /home/u/, /Users/me/: obvious placeholders, not real accounts
+      if (/^(agent|example|sample|dummy|someone|nobody|guest)$/.test(user)) return true;
       return false;
     },
   },
