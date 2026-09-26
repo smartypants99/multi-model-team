@@ -1,0 +1,14 @@
+export { httpJson, withRetry, sleep } from "./http.js";
+export type { HttpOptions, RetryOptions } from "./http.js";
+export { MockProvider, MOCK_ENDPOINT, detectStage } from "./mock.js";
+export type { MockOptions } from "./mock.js";
+export { AnthropicAdapter, capsFromMetadata } from "./anthropic.js";
+export type { AnthropicOptions } from "./anthropic.js";
+export { OpenAIResponsesAdapter, openaiDefaultCaps } from "./openai-responses.js";
+export type { OpenAIResponsesOptions } from "./openai-responses.js";
+export { OpenAIChatAdapter, defaultCaps as chatDefaultCaps } from "./openai-chat.js";
+export type { OpenAIChatOptions, ChatFlavor } from "./openai-chat.js";
+export { resolveNative, allowedLevels, clampLevel, BUDGET_TABLE } from "./reasoning.js";
+export type { NativeReasoning, ReasoningProvider } from "./reasoning.js";
+export { createAdapter, applyHints, findHint, parseReasoningHint, nativeName, defaultCapabilities } from "./registry.js";
+export type { AdapterConfig, CapabilityHint, CapabilityHints } from "./registry.js";
