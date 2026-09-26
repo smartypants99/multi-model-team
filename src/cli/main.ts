@@ -125,7 +125,7 @@ async function startServer(engine: Engine, port: number): Promise<DashboardServe
 }
 
 async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: boolean): Promise<number> {
-  let request = typeof args.flags.request === "string" ? args.flags.request : args._.slice(1).join(" ") || (mock ? "research the top pen brands and make a game with better pens being bosses" : "");
+  let request = typeof args.flags.request === "string" ? args.flags.request : args._.slice(1).join(" ");
   // --resume <runId>: continue an interrupted run from its checkpoint (completed tasks are not redone).
   let resumeFrom: string | undefined;
   if (typeof args.flags.resume === "string") {
@@ -138,6 +138,7 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
     }
     request = request || cp.request;
   }
+  if (!request && mock) request = "research the top pen brands and make a game with better pens being bosses";
   if (!request) {
     process.stderr.write("--request is required\n");
     return 2;
