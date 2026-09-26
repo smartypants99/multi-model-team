@@ -89,7 +89,7 @@ export function runCommandTool(sb: SandboxManager, gate: CommandGate): ToolDefin
     schema: {
       name: "run_command",
       description:
-        "Run a shell command inside your own sandbox (cwd = sandbox root) with a timeout. Heavy commands (installs, builds, training, large downloads) MUST include an 'estimate' of resources {ramMb, diskMb, durationSec, cpuCores?, vramMb?, reason}; the whole team votes on it and the engine blocks anything unsafe for this machine. Destructive commands that could touch anything outside your sandbox require the user's confirmation. Output is truncated at 2 MB.",
+        "Run a shell command inside your own sandbox (cwd = sandbox root) with a timeout. To start a server or other background process, redirect its output and background it (e.g. `node server.js > server.log 2>&1 &`); otherwise the command waits for it and times out. Background processes are stopped automatically when the run ends. Heavy commands (installs, builds, training, large downloads) MUST include an 'estimate' of resources {ramMb, diskMb, durationSec, cpuCores?, vramMb?, reason}; the whole team votes on it and the engine blocks anything unsafe for this machine. Destructive commands that could touch anything outside your sandbox require the user's confirmation. Output is truncated at 2 MB.",
       parameters: {
         type: "object",
         properties: {
@@ -132,7 +132,7 @@ export function runCommandTool(sb: SandboxManager, gate: CommandGate): ToolDefin
       }
 
       // 3. Run with timeout and memory monitoring.
-      const res = await runCommand(req, { rssLimitMb: gate.guard.rssLimitMb(), timeoutMs, env: sandboxEnv() });
+      const res = await runCommand(req, { rssLimitMb: gate.guard.rssLimitMb(), timeoutMs, env: sandboxEnv(), groupKey: ctx.runId });
       gate.bus.emit("command.run", { memberId: ctx.member.id, command, cwd, exitCode: res.exitCode, timedOut: res.timedOut, killedReason: res.killedReason, durationMs: res.durationMs, peakRssMb: res.peakRssMb }, { memberId: ctx.member.id, taskId: ctx.taskId });
       const head = `exit code: ${res.exitCode}${res.timedOut ? " (TIMED OUT)" : ""}${res.killedReason ? ` (killed: ${res.killedReason})` : ""} in ${res.durationMs} ms`;
       const body = [res.stdout && `--- stdout ---\n${res.stdout}`, res.stderr && `--- stderr ---\n${res.stderr}`].filter(Boolean).join("\n");

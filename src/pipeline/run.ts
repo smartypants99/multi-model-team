@@ -22,7 +22,7 @@ import { loadWorkTypes, builtinWorkTypesDir, renderPrompt, type PromptStage } fr
 import { detectHostResources } from "../sandbox/resources.js";
 import { ResourceGuard, formatHost } from "../sandbox/guard.js";
 import { SandboxManager } from "../sandbox/manager.js";
-import { runCommand, sandboxEnv } from "../sandbox/runner.js";
+import { runCommand, sandboxEnv, killLeftoverProcesses } from "../sandbox/runner.js";
 import { searchBackendFromConfig, webSearchTool } from "../tools/search.js";
 import { fetchUrlTool } from "../tools/fetch.js";
 import { NotesStore, notesTools } from "../tools/notes.js";
@@ -604,7 +604,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       async function runTests(memberId: string, suite: NonNullable<ReturnType<typeof detectTestCommand>>): Promise<TestRun> {
         const dir = sb.sandboxDir(memberId);
         const hash = sb.hashFiles(dir, suite.suitePatterns);
-        const res = await runCommand({ command: suite.command, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs }, { rssLimitMb: guard.rssLimitMb(), timeoutMs: cfg.safety.commandTimeoutMs, env: sandboxEnv() });
+        const res = await runCommand({ command: suite.command, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs }, { rssLimitMb: guard.rssLimitMb(), timeoutMs: cfg.safety.commandTimeoutMs, env: sandboxEnv(), groupKey: runId });
         bus.emit("command.run", { memberId, command: suite.command, cwd: dir, exitCode: res.exitCode, timedOut: res.timedOut, killedReason: res.killedReason, durationMs: res.durationMs }, { stage: "compete", taskId: task.id, memberId });
         return makeTestRun(suite.command, hash, res, parseTestOutput(suite.kind, res));
       }
@@ -674,6 +674,8 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
     bus.emit("run.finished", { status: result.status, summary: result.error, totalCostUsd: result.totalCostUsd }, { stage: stopped ? "done" : "failed" });
     return result;
   } finally {
+    const killed = killLeftoverProcesses(runId);
+    if (killed) bus.emit("command.run", { memberId: "", command: "(cleanup)", cwd: "", exitCode: null, timedOut: false, killedReason: `stopped ${killed} leftover process group(s) at run end`, durationMs: 0 }, {});
     logger.close?.();
   }
 }

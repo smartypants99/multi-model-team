@@ -59,3 +59,26 @@ describe("runCommand", () => {
     }
   });
 });
+
+describe("leftover background processes", () => {
+  it("are killed when the run's group is cleaned up", async () => {
+    const { runCommand: run, killLeftoverProcesses } = await import("../src/sandbox/runner.js");
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const pidFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mmt-bg-")), "pid");
+    const script = `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setInterval(()=>{},1e6)`;
+    const cmd = process.platform === "win32"
+      ? `start /b node -e "${script.replace(/"/g, '\\"')}" > NUL 2>&1`
+      : `node -e "${script.replace(/"/g, '\\"')}" > /dev/null 2>&1 & echo started`;
+    const r = await run({ command: cmd, cwd: process.cwd(), timeoutMs: 5000 }, { rssLimitMb: 500, timeoutMs: 5000, groupKey: "grp-test" });
+    expect(r.timedOut).toBe(false);
+    for (let i = 0; i < 50 && !fs.existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 100));
+    const pid = Number(fs.readFileSync(pidFile, "utf8"));
+    const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    expect(alive()).toBe(true);
+    expect(killLeftoverProcesses("grp-test")).toBeGreaterThanOrEqual(1);
+    for (let i = 0; i < 30 && alive(); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(alive()).toBe(false);
+  }, 20_000);
+});

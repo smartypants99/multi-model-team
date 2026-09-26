@@ -11,6 +11,8 @@ import type { CommandRequest, CommandResult } from "../core/types.js";
 export interface RunOptions {
   rssLimitMb: number;
   timeoutMs: number;
+  /** Owner of any background processes the command leaves behind (e.g. the run id); see killLeftoverProcesses. */
+  groupKey?: string;
   env?: Record<string, string>;
   onOutput?: (chunk: string, stream: "stdout" | "stderr") => void;
   /** Poll interval for the RSS check (ms). Default 500. */
@@ -160,6 +162,34 @@ export async function treeRssMb(rootPid: number): Promise<number> {
   return totalKb / 1024;
 }
 
+/** Process groups spawned per groupKey, so servers a model left running can be stopped when the run ends. */
+const groups = new Map<string, Set<number>>();
+
+/**
+ * Kill every process group started under `groupKey` (POSIX: the shell's own
+ * group, which background children inherit). Best effort; on Windows the
+ * process tree is killed through taskkill per remembered pid.
+ */
+export function killLeftoverProcesses(groupKey: string): number {
+  const set = groups.get(groupKey);
+  if (!set) return 0;
+  let killed = 0;
+  for (const pid of set) {
+    try {
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).unref();
+      } else {
+        process.kill(-pid, "SIGKILL");
+      }
+      killed++;
+    } catch {
+      /* already gone */
+    }
+  }
+  groups.delete(groupKey);
+  return killed;
+}
+
 export function runCommand(req: CommandRequest, opts: RunOptions): Promise<CommandResult> {
   const start = Date.now();
   const timeoutMs = Math.max(1, opts.timeoutMs);
@@ -171,6 +201,10 @@ export function runCommand(req: CommandRequest, opts: RunOptions): Promise<Comma
     let child: ChildProcess;
     try {
       child = spawnShell(req.command, req.cwd, env);
+      if (opts.groupKey && child.pid) {
+        if (!groups.has(opts.groupKey)) groups.set(opts.groupKey, new Set());
+        groups.get(opts.groupKey)!.add(child.pid);
+      }
     } catch (e) {
       resolve({
         exitCode: null,
