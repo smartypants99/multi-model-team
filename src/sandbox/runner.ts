@@ -175,18 +175,20 @@ export function killLeftoverProcesses(groupKey: string): number {
   if (!set) return 0;
   let killed = 0;
   for (const pid of set) {
-    try {
-      if (process.platform === "win32") {
+    let hit = false;
+    if (process.platform === "win32") {
+      try {
         spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).unref();
-      } else {
-        // Group first (the shell's group, inherited by its background children), then the pid itself.
-        try { process.kill(-pid, "SIGKILL"); } catch { /* no such group */ }
-        process.kill(pid, "SIGKILL");
+        hit = true;
+      } catch {
+        /* taskkill missing */
       }
-      killed++;
-    } catch {
-      /* already gone */
+    } else {
+      // The shell's group (inherited by its background children), then the pid itself.
+      try { process.kill(-pid, "SIGKILL"); hit = true; } catch { /* no such group */ }
+      try { process.kill(pid, "SIGKILL"); hit = true; } catch { /* already gone */ }
     }
+    if (hit) killed++;
   }
   groups.delete(groupKey);
   return killed;
@@ -281,15 +283,19 @@ export function runCommand(req: CommandRequest, opts: RunOptions): Promise<Comma
       if (!killedReason) killedReason = "spawn failed";
       finish(null, `\n${err.message}`);
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       // Remember surviving descendants (background servers) so the run can stop them later.
       // Their ParentProcessId/ppid keeps pointing at the exited shell on both Windows and POSIX.
-      if (opts.groupKey && child.pid) {
-        descendantPids(child.pid).then((pids) => {
-          if (!pids.length) return;
-          if (!groups.has(opts.groupKey!)) groups.set(opts.groupKey!, new Set());
-          for (const p of pids) groups.get(opts.groupKey!)!.add(p);
-        }, () => {});
+      if (opts.groupKey && child.pid && !timedOut && !killedReason) {
+        try {
+          const pids = await descendantPids(child.pid);
+          if (pids.length) {
+            if (!groups.has(opts.groupKey)) groups.set(opts.groupKey, new Set());
+            for (const p of pids) groups.get(opts.groupKey)!.add(p);
+          }
+        } catch {
+          /* best effort */
+        }
       }
       finish(code);
     });
