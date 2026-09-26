@@ -1,1 +1,1 @@
-{"ts":"2026-09-26T04:01:00.237Z","memberId":"m6","label":"Agent B","model":"mock-broken","reasoning":"none","stage":"verify","taskId":"t1","tag":"verify/Agent B","usage":{},"costUsd":0,"error":"unknown: mock-broken always fails"}
+{"ts":"2026-09-26T04:33:15.609Z","memberId":"m6","label":"Agent B","model":"mock-broken","reasoning":"none","stage":"verify","taskId":"t1","tag":"verify/Agent B","usage":{},"costUsd":0,"error":"unknown: mock-broken always fails"}

@@ -193,7 +193,7 @@ Every run writes a folder with `events.jsonl` (machine-readable, the source of t
 
 ## Cost warning
 
-Multi-model debates use a lot of API credit. A single task can involve dozens of calls across four or five paid providers, at high reasoning effort. Set a cap:
+Multi-model debates use a lot of API credit. A single task can involve dozens of calls across four or five paid providers, at high reasoning effort. For scale: with two cheap models at low effort, a haiku cost about $0.12 and a tiny tested library about $0.40; a real feature with five flagship models at high effort can cost tens of dollars. Set a cap:
 
 ```json
 // config.local.json

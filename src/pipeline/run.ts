@@ -538,13 +538,16 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       done.push(st);
 
       // ---------------------------------------------------------- helpers
-      async function emitDiff(m: TeamMember) {
+      /** Emits the member's diff against the current best; returns the number of changed files. */
+      async function emitDiff(m: TeamMember): Promise<number> {
         try {
           const base = st.best?.snapshotDir ?? bestDirOf(done);
           const d = base && fs.existsSync(base) ? await sb.diff(base, sb.sandboxDir(m.id)) : await sb.diff(ensureDir(path.join(workspaceRoot, runId, "empty")), sb.sandboxDir(m.id));
           bus.emit("sandbox.diff", { memberId: m.id, baseVersion: st.best?.version ?? 0, files: d.files, diff: d.diff.slice(0, 200_000) }, { taskId: task.id, memberId: m.id });
+          return d.files.length;
         } catch (e) {
           bus.emit("run.error", { message: `diff failed for ${m.label}: ${(e as Error).message}` }, { taskId: task.id });
+          return 0;
         }
       }
       async function sandboxDump(memberId: string): Promise<string> {
@@ -562,10 +565,19 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         return parts.join("\n") || "(empty sandbox)";
       }
       async function improveUntilCrowned(instruction: string, items: string[], when: string) {
+        // Nothing to change (the team accepted the work as-is): do not burn improvement rounds.
+        if (!items.length) {
+          bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: `No changes were agreed ${when}; skipping the improvement round.`, rationale: "" }, { stage: "compete", taskId: task.id });
+          return;
+        }
         // "Review continues" until a candidate beats the best, bounded by the stall limit.
         let extra: string[] = [];
         for (let attempt = 1; attempt <= Math.max(1, cfg.pipeline.stallLimit); attempt++) {
-          await improveAll(instruction, [...items, ...extra]);
+          const changed = await improveAll(instruction, [...items, ...extra]);
+          if (!changed) {
+            bus.emit("chat.message", { channel: "system", round: attempt, memberId: "", label: "engine", message: `Improvement attempt ${attempt} ${when} changed no files; keeping v${st.best?.version ?? 0}.`, rationale: "" }, { stage: "compete", taskId: task.id });
+            return;
+          }
           const before = st.version;
           await compete(`${when} (attempt ${attempt})`);
           if (st.version > before) return;
@@ -573,18 +585,21 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         }
         bus.emit("best.stalled", { taskId: task.id, attempts: cfg.pipeline.stallLimit, reason: `no candidate beat the current best in ${cfg.pipeline.stallLimit} attempt(s) ${when}; keeping v${st.best?.version ?? 0}` }, { stage: "compete", taskId: task.id });
       }
-      async function improveAll(instruction: string, items: string[]) {
+      /** Runs an improvement round for every live member; returns whether any sandbox actually changed. */
+      async function improveAll(instruction: string, items: string[]): Promise<boolean> {
         // Everyone starts the improvement round from the crowned best (or the lead's work when nothing is crowned yet).
         if (st.best) sb.resetAllToBest(live().map((m) => m.id));
+        let anyChanged = false;
         await settle(live().map(async (m) => {
           try {
             const { json, result: r } = await llm.callJson<any>({ member: m, stage: "do", taskId: task.id, system: sys(m, "do", common(m, `IMPROVEMENT ROUND. Your sandbox currently holds ${st.best ? `the current best version v${st.best.version}` : `a copy of ${lead.label}'s work`}. Instruction: ${instruction}.\nItems:\n${items.map((i) => `- ${i}`).join("\n") || "- (use your own judgement)"}\nKeep or add tests so improvements are measurable. Do not remove passing tests.`)), messages: [textMessage("user", "Improve your version now.")], tools: toolsFor(wt), toolCtx: toolCtx(m, task.id, wt), tag: `improve/${m.label}`, signal });
             bus.emit("chat.message", { channel: "lead", round: st.version + 1, memberId: m.id, label: m.label, message: `Improvement: ${json.summary ?? ""}`, rationale: String(json.rationale ?? ""), reasoningText: r.reasoningText, filesChanged: json.files_changed }, { stage: "do", taskId: task.id, memberId: m.id });
-            await emitDiff(m);
+            if ((await emitDiff(m)) > 0) anyChanged = true;
           } catch (e) {
             if (!(e instanceof MemberFailedError)) throw e;
           }
         }));
+        return anyChanged;
       }
       async function runTests(memberId: string, suite: NonNullable<ReturnType<typeof detectTestCommand>>): Promise<TestRun> {
         const dir = sb.sandboxDir(memberId);
