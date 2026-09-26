@@ -45,7 +45,7 @@ jobs:
         run: npm run demo
 
       - name: Verify demo output
-        run: node -e "const fs=require('fs'),p=require('path');for(const f of ['run.json','events.jsonl']){const fp=p.join('demo-run',f);if(!fs.existsSync(fp)||fs.statSync(fp).size===0){console.error('missing or empty: '+fp);process.exit(1)}console.log('ok: '+fp)}"
+        run: node scripts/check-demo.mjs demo-run
 
       - name: Scan for secrets and personal details
         run: npm run scan-secrets
