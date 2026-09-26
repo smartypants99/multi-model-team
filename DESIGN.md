@@ -370,6 +370,9 @@ independent.
   blocks anything above `maxResourceFraction` (default 60 %) of free RAM/disk
   and kills any process tree whose RSS exceeds the limit. Every command has
   a timeout. Sandboxed commands never see API keys in their environment.
+  Background processes a model starts (dev servers) are remembered by
+  process group per run and stopped when the run ends, so nothing outlives
+  the run.
 - **Redaction.** Every log line and UI payload passes through a redactor
   seeded with the real key values plus generic key patterns.
 
