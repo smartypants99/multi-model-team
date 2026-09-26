@@ -8,7 +8,8 @@ import type { ModelCapabilities, ModelInfo, ProviderAdapter, ProviderEndpoint } 
 import { attachConfigPricing, collectCandidates, detectProviders, isUsableKey } from "../src/providers/discovery.js";
 import { ModelCache, keyFingerprint } from "../src/providers/cache.js";
 
-const ANTHROPIC_KEY = ["sk", "ant", "test", "anthropic", "value", "0001"].join("-"); // assembled at runtime so the scanner never sees a key-shaped literal
+const ANTHROPIC_KEY = ["sk", "ant", "test", "anthropic", "value", "0001"].join("-");
+const ANOTHER_KEY = ["sk", "ant", "another", "value"].join("-"); // assembled at runtime so the scanner never sees a key-shaped literal
 const ZAI_KEY = "zai-secret-key-0002";
 const FOO_KEY = "foo-secret-key-0003";
 
@@ -192,14 +193,14 @@ describe("detectProviders: model discovery", () => {
   it("invalidates the cache when the key changes or the entry expires", async () => {
     const f = factory((e) => e === "anthropic");
     await detectProviders({ config, env: { ANTHROPIC_API_KEY: ANTHROPIC_KEY }, adapterFactory: f });
-    await detectProviders({ config, env: { ANTHROPIC_API_KEY: ["sk", "ant", "another", "value"].join("-") }, adapterFactory: f });
+    await detectProviders({ config, env: { ANTHROPIC_API_KEY: ANOTHER_KEY }, adapterFactory: f });
     expect(FakeAdapter.calls.filter((c) => c.method === "listModels")).toHaveLength(2);
 
     const cache = new ModelCache(homeDir);
-    expect(cache.get("anthropic", keyFingerprint("sk-ant-another-key"), 24)).not.toBeNull();
-    expect(cache.get("anthropic", keyFingerprint("sk-ant-another-key"), 0)).toBeNull();
+    expect(cache.get("anthropic", keyFingerprint(ANOTHER_KEY), 24)).not.toBeNull();
+    expect(cache.get("anthropic", keyFingerprint(ANOTHER_KEY), 0)).toBeNull();
     cache.clear();
-    expect(cache.get("anthropic", keyFingerprint("sk-ant-another-key"), 24)).toBeNull();
+    expect(cache.get("anthropic", keyFingerprint(ANOTHER_KEY), 24)).toBeNull();
   });
 
   it("attachConfigPricing prefers exact keys and matches anchored regexes case-insensitively", () => {
