@@ -432,6 +432,25 @@ with a `cost-cap` question when reached. Live totals are on the event stream.
 MIT — maximally permissive, compatible with the plugin ecosystem, and the
 usual choice for developer tooling.
 
+## 16b. What has been validated live
+
+Besides the offline mock suite and CI, these paths were exercised against real
+services on 2026-09-26:
+
+- Z.AI: endpoint probing with a coding-plan key (the general and China
+  endpoints list models but reject completions; only the coding endpoint is
+  kept), model discovery, `thinking`/`reasoning_effort` parameters, and a
+  full verification + discussion round with `glm-5.3-flash`.
+- Claude Code CLI transport as the lead (`claude -p`, MCP tool server) with
+  `claude-sonnet-5` and `claude-haiku-4-5`, including the tool loop, cost
+  pass-through and JSON replies.
+- The real Playwright screenshot path (served sandbox, module scripts, image
+  attachment to the next message).
+
+OpenAI, xAI and Moonshot adapters are covered by stubbed-fetch unit tests
+only; the first live run with those keys is the true test of their wire
+formats.
+
 ## 17. Assumptions
 
 - Node ≥ 20 and git are installed (Claude Code needs both anyway).
