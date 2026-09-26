@@ -166,6 +166,7 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   }
   const terminal = isChild ? undefined : terminalInteraction();
   const live = engine.startRun({ request, mock, outDir, overrides, autoAnswer: !!args.flags.yes, reselect: !!args.flags.reselect, runId, terminal });
+  if (isChild) armChildLifetime(Number(process.env.MMT_DETACHED_MAX_HOURS ?? 12), () => { engine.control(live.runId, "stop"); setTimeout(() => process.exit(0), 5000).unref(); });
   const dashboard = server ? `${server.url()}#/run/${live.runId}` : undefined;
   engine.writeControlFile(live.runId, { dashboard, port: server?.port() });
   if (!isChild) {
@@ -189,6 +190,12 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   await new Promise((r) => setTimeout(r, 30 * 60 * 1000));
   await server?.stop();
   return 0;
+}
+
+/** Hard ceiling on a detached child's life, even if a question is never answered. */
+function armChildLifetime(hours: number, onExpire: () => void): void {
+  const t = setTimeout(onExpire, hours * 3600 * 1000);
+  t.unref();
 }
 
 async function controlFor(loaded: ReturnType<typeof loadConfig>, runId: string): Promise<{ port?: number; outDir?: string }> {

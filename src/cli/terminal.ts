@@ -3,17 +3,39 @@ import readline from "node:readline";
 import type { Interaction, UserAnswer, UserQuestion } from "../core/types.js";
 import { levelsOf } from "./engine.js";
 
-export function terminalInteraction(out: NodeJS.WriteStream = process.stdout, input: NodeJS.ReadStream = process.stdin): Interaction {
+export interface CancellableInteraction extends Interaction {
+  /** Close any open prompt (e.g. the question was answered from the web UI). */
+  cancel(questionId: string): void;
+}
+
+export function terminalInteraction(out: NodeJS.WriteStream = process.stdout, input: NodeJS.ReadStream = process.stdin): CancellableInteraction {
+  const open = new Map<string, readline.Interface>();
+  let current: string | undefined;
   const prompt = (text: string) =>
-    new Promise<string>((resolve) => {
+    new Promise<string>((resolve, reject) => {
       const rl = readline.createInterface({ input, output: out });
+      if (current) open.set(current, rl);
+      let answered = false;
+      rl.on("close", () => {
+        if (!answered) reject(new Error("prompt cancelled: answered elsewhere"));
+      });
       rl.question(text, (a) => {
+        answered = true;
         rl.close();
         resolve(a.trim());
       });
     });
   return {
+    cancel(questionId) {
+      const rl = open.get(questionId);
+      if (rl) {
+        open.delete(questionId);
+        out.write("\n(answered elsewhere)\n");
+        rl.close();
+      }
+    },
     async ask(q: UserQuestion): Promise<UserAnswer> {
+      current = q.id;
       out.write(`\n\x1b[36m? ${q.text}\x1b[0m\n`);
       switch (q.kind) {
         case "clarify": {

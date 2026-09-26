@@ -36,7 +36,7 @@ export interface StartRunOptions {
   reselect?: boolean;
   runId?: string;
   /** Extra channel that may answer questions (e.g. the terminal). */
-  terminal?: Interaction;
+  terminal?: Interaction & { cancel?: (questionId: string) => void };
 }
 
 export class Engine implements DashboardController {
@@ -63,11 +63,12 @@ export class Engine implements DashboardController {
             if (done) return;
             done = true;
             pending.delete(question.id);
+            opts.terminal?.cancel?.(question.id);
             resolve(a);
           };
           pending.set(question.id, { question, resolve: finish });
           live.status = "paused";
-          opts.terminal?.ask(question).then(finish).catch(() => {});
+          opts.terminal?.ask(question).then(finish).catch(() => { /* cancelled: answered from another channel */ });
         }),
     };
     bus.on((e) => {
