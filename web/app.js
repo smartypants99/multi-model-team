@@ -187,7 +187,7 @@
       case "task.started":
         if (d.task) {
           if (!s.tasks[d.task.id]) s.taskOrder.push(d.task.id);
-          s.tasks[d.task.id] = { ...(s.tasks[d.task.id] || {}), task: d.task, status: "running", startedAt: e.ts };
+          s.tasks[d.task.id] = { ...(s.tasks[d.task.id] || {}), task: d.task, status: "running", startedAt: e.ts, resumed: !!d.resumed };
         }
         break;
       case "task.finished":
@@ -332,7 +332,7 @@
       const t = s.tasks[id];
       const task = t.task || {};
       const cls = t.status === "running" ? "is-running" : t.status === "ok" ? "is-ok" : t.status === "partial" ? "is-partial" : t.status === "failed" ? "is-failed" : "";
-      const meta = el("div", { class: "tl-meta" }, el("span", { class: "chip", title: task.workTypeFallbackNote || "Work type" }, task.workType || "?"), el("span", { class: "chip " + (t.status || "") }, t.status || "pending"));
+      const meta = el("div", { class: "tl-meta" }, el("span", { class: "chip", title: task.workTypeFallbackNote || "Work type" }, task.workType || "?"), el("span", { class: "chip " + (t.status || "") }, t.status || "pending"), t.resumed ? el("span", { class: "chip", title: "Replayed from the checkpoint of an earlier run; not redone" }, "resumed") : null);
       if (t.status === "running" && s.currentTaskId === id && s.stage) meta.append(el("span", { class: "tl-stage" }, "stage: " + s.stage));
       const node = el(
         "div",
@@ -986,7 +986,7 @@
     if (!ui.runs.length) sel.append(el("option", { value: "" }, "No runs yet"));
     for (const r of ui.runs) {
       const when = r.startedAt ? new Date(r.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "";
-      const label = `${r.live ? "● live  " : ""}${when}  ${(r.request || r.id).slice(0, 60)}`;
+      const label = `${r.live ? "● live  " : r.status === "interrupted" ? "⚠ interrupted  " : r.status === "failed" ? "✖ failed  " : ""}${when}  ${(r.request || r.id).slice(0, 60)}`;
       sel.append(el("option", { value: r.id, title: r.id }, label));
     }
     const target = prev && ui.runs.some((r) => r.id === prev) ? prev : ui.runs[0]?.id || "";
