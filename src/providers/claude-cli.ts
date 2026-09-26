@@ -143,9 +143,15 @@ export class ClaudeCliAdapter implements ProviderAdapter {
     const effort = this.effortFor(req.model, req.reasoning);
     const prompt = flattenConversation(req.messages);
     const useTools = !!(req.tools?.length && req.toolExecutors);
-    const callDir = fs.mkdtempSync(path.join(this.opts.tmpDir ?? os.tmpdir(), "mmt-claude-cli-"));
+    // Per-call files live in a private (0700) folder under the user's home, not the shared temp dir,
+    // and the system prompt goes through a file rather than argv (no ps exposure, no cmd.exe parsing).
+    const privateRoot = this.opts.tmpDir ?? path.join(os.homedir(), ".multi-model-team", ".cli-tmp");
+    fs.mkdirSync(privateRoot, { recursive: true, mode: 0o700 });
+    const callDir = fs.mkdtempSync(path.join(privateRoot, "call-"));
     const sessionId = crypto.randomBytes(8).toString("hex");
-    const extra: string[] = ["--tools", "", "--system-prompt", req.system || "You are a helpful assistant."];
+    const systemFile = path.join(callDir, "system.md");
+    fs.writeFileSync(systemFile, req.system || "You are a helpful assistant.", { mode: 0o600 });
+    const extra: string[] = ["--tools", "", "--system-prompt-file", systemFile];
     let server: McpToolServer | undefined;
     try {
       if (useTools) {

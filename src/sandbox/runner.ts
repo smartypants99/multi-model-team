@@ -21,14 +21,16 @@ export interface RunOptions {
 
 export const MAX_CAPTURE_BYTES = 2 * 1024 * 1024;
 const TRUNCATION_MARKER = "\n...[output truncated at 2 MB]...\n";
-const SECRET_KEY = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_PAT$|^GH_|^GITHUB_|AUTH|COOKIE|PRIVATE/i;
+const SECRET_KEY = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_PAT$|^GH_|^GITHUB_|AUTH|COOKIE|PRIVATE|SSH_AUTH_SOCK|DATABASE_URL|_URI$|_DSN$/i;
+/** Variables that would point a sandboxed command at the engine's own private files. */
+const PRIVATE_LOCATION = /^(TMPDIR|TMP|TEMP|MMT_HOME|CLAUDE_CONFIG_DIR)$/;
 
-/** Build the environment for a sandboxed command: process.env minus secrets, plus explicit extras. */
+/** Build the environment for a sandboxed command: process.env minus secrets and private locations, plus explicit extras. */
 export function sandboxEnv(extra?: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v === undefined) continue;
-    if (SECRET_KEY.test(k)) continue;
+    if (SECRET_KEY.test(k) || PRIVATE_LOCATION.test(k)) continue;
     env[k] = v;
   }
   if (extra) for (const [k, v] of Object.entries(extra)) env[k] = v;

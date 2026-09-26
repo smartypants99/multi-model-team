@@ -194,7 +194,11 @@ describe("ClaudeCliAdapter", () => {
     expect(args).toContain("--model");
     expect(args[args.indexOf("--model") + 1]).toBe("claude-sonnet-5");
     expect(args[args.indexOf("--effort") + 1]).toBe("medium");
-    expect(args[args.indexOf("--system-prompt") + 1]).toBe("Be terse.");
+    // The system prompt travels through a private file, never argv (no ps exposure, no cmd.exe parsing).
+    expect(args).not.toContain("--system-prompt");
+    expect(args).not.toContain("Be terse.");
+    const sysFile = args[args.indexOf("--system-prompt-file") + 1];
+    expect(sysFile).toMatch(/system\.md$/);
     expect(args[args.indexOf("--tools") + 1]).toBe("");
     expect(args[args.indexOf("--max-turns") + 1]).toBe("1");
     expect(args).not.toContain("--mcp-config");

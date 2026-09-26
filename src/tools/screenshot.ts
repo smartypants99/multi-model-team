@@ -10,6 +10,7 @@ import http from "node:http";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ToolDefinition, ContentPart } from "../core/types.js";
+import { checkOutboundUrl } from "./netguard.js";
 
 const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp", ".wasm": "application/wasm", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".woff": "font/woff", ".woff2": "font/woff2", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav" };
 
@@ -101,10 +102,9 @@ export function screenshotTool(opts: ScreenshotOptions): ToolDefinition & { last
       let url: string;
       let served: Awaited<ReturnType<typeof serveDirectory>> | undefined;
       if (/^https?:\/\//i.test(target)) {
-        // Only local servers (the app under test) and public hosts; never link-local / cloud metadata addresses.
-        let host = "";
-        try { host = new URL(target).hostname; } catch { return "error: invalid URL"; }
-        if (/^(169\.254\.|100\.100\.100\.200$|fd00:ec2|fe80:|metadata)/i.test(host)) return "error: that address is not allowed";
+        // Local dev servers (the app under test) and public hosts only; never private, link-local or metadata addresses.
+        const refused = await checkOutboundUrl(target, { allowLoopback: true });
+        if (refused) return `error: ${refused}`;
         url = target;
       } else {
         const abs = opts.resolveInSandbox(ctx.member.id, target);

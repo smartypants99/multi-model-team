@@ -23,6 +23,7 @@ import { detectHostResources } from "../sandbox/resources.js";
 import { ResourceGuard, formatHost } from "../sandbox/guard.js";
 import { SandboxManager } from "../sandbox/manager.js";
 import { runCommand, sandboxEnv, killLeftoverProcesses } from "../sandbox/runner.js";
+import { needsConfirmation } from "../sandbox/destructive.js";
 import { searchBackendFromConfig, webSearchTool } from "../tools/search.js";
 import { fetchUrlTool } from "../tools/fetch.js";
 import { NotesStore, notesTools } from "../tools/notes.js";
@@ -678,6 +679,15 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       async function runTests(memberId: string, suite: NonNullable<ReturnType<typeof detectTestCommand>>): Promise<TestRun> {
         const dir = sb.sandboxDir(memberId);
         const hash = sb.hashFiles(dir, suite.suitePatterns);
+        // A member can put anything in package.json "test"; treat the resolved script like any other command.
+        const script = resolvedTestScript(dir, suite.command);
+        const dc = needsConfirmation(script, dir, dir, cfg.safety.destructivePatterns);
+        const g = guard.check({ command: script, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs });
+        if (dc.needed || g.decision === "block") {
+          const reason = dc.needed ? `test command reaches outside the sandbox (${dc.classification.reason})` : `resource guard: ${g.reason}`;
+          bus.emit("resource.check", { command: script, decision: "block", reason: `test suite of ${labelOf(memberId)} refused: ${reason}` }, { stage: "compete", taskId: task.id, memberId });
+          return makeTestRun(suite.command, hash, { exitCode: null, stdout: "", stderr: `refused: ${reason}`, timedOut: false, durationMs: 0 }, [{ name: "suite", passed: false, output: `refused: ${reason}` }]);
+        }
         const res = await runCommand({ command: suite.command, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs }, { rssLimitMb: guard.rssLimitMb(), timeoutMs: cfg.safety.commandTimeoutMs, env: sandboxEnv(), groupKey: runId });
         bus.emit("command.run", { memberId, command: suite.command, cwd: dir, exitCode: res.exitCode, timedOut: res.timedOut, killedReason: res.killedReason, durationMs: res.durationMs }, { stage: "compete", taskId: task.id, memberId });
         return makeTestRun(suite.command, hash, res, parseTestOutput(suite.kind, res));
@@ -803,6 +813,20 @@ function closestWorkType(requested: string, task: any, workTypes: Map<string, Wo
   const docOne = [...workTypes.values()].find((w) => w.workspace === "document");
   return docOne?.name ?? names[0];
 }
+/** The shell text a test command will actually execute (expands `npm test` to the package.json script). */
+function resolvedTestScript(dir: string, command: string): string {
+  if (/^npm (run )?test\b/.test(command)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+      const script = pkg?.scripts?.test;
+      if (typeof script === "string") return `${script} ${command.replace(/^npm (run )?test/, "").trim()}`.trim();
+    } catch {
+      /* fall through */
+    }
+  }
+  return command;
+}
+
 function bestDirOf(done: TaskState[]): string | undefined {
   for (let i = done.length - 1; i >= 0; i--) if (done[i].best?.snapshotDir) return done[i].best!.snapshotDir;
   return undefined;
