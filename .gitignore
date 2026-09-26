@@ -1,0 +1,44 @@
+# Secrets and local configuration (may hold API keys or personal choices)
+.env
+.env.*
+!.env.example
+config.local.json
+profile.json
+*.local.json
+.mmt/
+
+# Run logs (private content). The committed demo run is the only exception.
+runs/
+!demo-run/
+
+# Sandboxes and workspaces created for models
+sandboxes/
+workspaces/
+
+# Caches
+.cache/
+model-cache/
+*.tsbuildinfo
+
+# Build output
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+!.vscode/extensions.json

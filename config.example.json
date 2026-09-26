@@ -1,0 +1,22 @@
+{
+  "$comment": "Copy to config.local.json (git-ignored) to override any value. Keys never go here; use .env.",
+  "pipeline": {
+    "maxDiscussionRounds": 6,
+    "stallLimit": 3,
+    "defaultReasoning": "medium"
+  },
+  "cost": {
+    "capUsd": null
+  },
+  "search": {
+    "provider": "mock",
+    "envKey": "SEARCH_API_KEY"
+  },
+  "ui": {
+    "port": 4310,
+    "openBrowser": true
+  },
+  "safety": {
+    "maxResourceFraction": 0.6
+  }
+}

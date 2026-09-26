@@ -1,0 +1,32 @@
+{
+  "name": "multi-model-team",
+  "version": "0.1.0",
+  "description": "A multi-model team for Claude Code: frontier models from different providers verify, debate, red-team and improve Claude's work at every stage.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.10"
+  },
+  "bin": {
+    "mmt": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo": "node dist/cli/main.js run --mock --request \"research the top pen brands and make a game with better pens being bosses\" --out demo-run --no-ui --yes",
+    "scan-secrets": "node scripts/scan-secrets.mjs",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
