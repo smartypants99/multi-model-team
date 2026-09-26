@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [20, 22]
+    steps:
+      - name: Checkout (full history for the secret scan)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Demo (mock end-to-end run)
+        run: npm run demo
+
+      - name: Verify demo output
+        run: node -e "const fs=require('fs'),p=require('path');for(const f of ['run.json','events.jsonl']){const fp=p.join('demo-run',f);if(!fs.existsSync(fp)||fs.statSync(fp).size===0){console.error('missing or empty: '+fp);process.exit(1)}console.log('ok: '+fp)}"
+
+      - name: Scan for secrets and personal details
+        run: npm run scan-secrets
