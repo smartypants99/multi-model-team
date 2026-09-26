@@ -47,30 +47,37 @@ export class OpenAIChatAdapter implements ProviderAdapter {
   }
 
   async probe(): Promise<boolean> {
-    try {
+    if (this.opts.flavor !== "zai") {
       await httpJson(this.url("/models"), { headers: this.headers(), timeoutMs: this.opts.timeoutMs });
       return true;
-    } catch (e) {
-      const err = e as ProviderError;
-      if (this.opts.flavor !== "zai" || !(err instanceof ProviderError) || err.kind !== "bad_request") throw e;
     }
-    // Z.AI: the models endpoint is undocumented; a 1-token completion proves the key works.
-    const model = this.opts.fallbackModels?.[0];
-    if (!model) return false;
-    try {
-      await httpJson(this.url("/chat/completions"), {
-        method: "POST",
-        headers: this.headers(),
-        body: { model, messages: [{ role: "user", content: "hi" }], max_tokens: 1, thinking: { type: "disabled" } },
-        timeoutMs: this.opts.timeoutMs,
-      });
-      return true;
-    } catch (e) {
-      const err = e as ProviderError;
-      if (err instanceof ProviderError && err.kind === "auth") return false;
-      if (err instanceof ProviderError && err.kind === "bad_request") return true; // authenticated; the model/params were just wrong
-      throw e;
+    // Z.AI: the models endpoint answers for keys that cannot actually be used on
+    // this endpoint (coding-plan keys on the general endpoint, and vice versa), so
+    // only a real 1-token completion on a cheap model proves the key works here.
+    const candidates = this.opts.fallbackModels?.length ? this.opts.fallbackModels : ["glm-4.5-flash"];
+    let lastErr: unknown;
+    for (const model of candidates.slice(0, 3)) {
+      try {
+        await httpJson(this.url("/chat/completions"), {
+          method: "POST",
+          headers: this.headers(),
+          body: { model, messages: [{ role: "user", content: "hi" }], max_tokens: 1, thinking: { type: "disabled" } },
+          timeoutMs: this.opts.timeoutMs,
+        });
+        return true;
+      } catch (e) {
+        lastErr = e;
+        const err = e as ProviderError;
+        if (!(err instanceof ProviderError)) throw e;
+        if (err.kind === "auth") return false;
+        if (isEntitlementError(err)) return false;
+        if (err.kind === "bad_request") continue; // authenticated, but this model/params are wrong here: try the next
+        if (err.kind === "rate_limit") return true; // a genuine rate limit still proves the key is valid here
+        throw e;
+      }
     }
+    if (lastErr instanceof ProviderError && lastErr.kind === "bad_request") return true;
+    return false;
   }
 
   async listModels(): Promise<ModelInfo[]> {
@@ -245,4 +252,9 @@ export function defaultCaps(id: string, flavor: ChatFlavor): ModelCapabilities {
     if (/kimi-k3|kimi-k2\.6/i.test(id)) caps.vision = true;
   }
   return caps;
+}
+
+/** Z.AI reports "no balance / no resource package" (code 1113) as HTTP 429; that means the key is not usable on this endpoint. */
+export function isEntitlementError(err: ProviderError): boolean {
+  return err.kind === "rate_limit" && /insufficient balance|resource package|recharge|余额不足|资源包|"?code"?\s*:\s*"?1113/i.test(err.message);
 }

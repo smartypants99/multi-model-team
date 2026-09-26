@@ -89,8 +89,14 @@ these it supports (`ReasoningControl`); the UI/CLI offer only those.
   GLM-5.3 / 5.3-flash: thinking forced (disabled → error).
 - Response `choices[0].message.{content, reasoning_content, tool_calls}`;
   echo `reasoning_content` back on assistant messages in tool loops.
-- Models list is undocumented: try `GET .../models`; if it fails, fall back
-  to the id list in `config.providers.fallbackModels.zai`.
+- Models list is undocumented but answers on every endpoint, even for keys
+  that cannot be used there (verified live: a coding-plan key lists models on
+  the general endpoint but completions fail with HTTP 429 code 1113
+  "insufficient balance or no resource package"). The probe therefore sends a
+  1-token completion to the first *paid* model in
+  `config.providers.fallbackModels.zai` and treats that 429 as "key not valid
+  on this endpoint". Free models (glm-4.5-flash) answer everywhere, so they
+  come last in the list.
 - Errors `{error:{code:"1302", message}}`; 429 codes 1113 balance, 1302 rate, 1305 overloaded.
 - Pricing ($/M): glm-5.3 1.4/4.4, glm-5.3-flash 0.15/0.5, glm-5.2 1.4/4.4, glm-5 1/3.2, glm-4.7 0.6/2.2,
   glm-4.6 0.6/2.2, glm-4.5 0.6/2.2, glm-4.5-air 0.2/1.1, glm-4.6v 0.3/0.9 (vision), glm-4.5v 0.6/1.8 (vision).

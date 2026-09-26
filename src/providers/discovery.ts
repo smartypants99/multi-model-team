@@ -81,7 +81,7 @@ export async function detectProviders(opts: DetectOptions): Promise<DetectResult
   }
 
   const cfg = opts.config;
-  const factory = opts.adapterFactory ?? ((endpoint, key) => createAdapter(endpoint, key, { timeoutMs: cfg.pipeline.callTimeoutMs, capabilityHints: cfg.capabilityHints }));
+  const factory = opts.adapterFactory ?? ((endpoint, key) => createAdapter(endpoint, key, { timeoutMs: cfg.pipeline.callTimeoutMs, capabilityHints: cfg.capabilityHints, fallbackModels: cfg.providers.fallbackModels }));
   const endpoints = [...cfg.providers.endpoints, ...cfg.providers.extraCompatible];
   const candidates = collectCandidates(endpoints, cfg.providers.extraCompatible, opts.env);
 

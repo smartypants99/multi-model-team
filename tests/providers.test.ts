@@ -542,3 +542,31 @@ describe("httpJson errors", () => {
     expect((await httpJson("https://example.invalid/x", { headers: {}, timeoutMs: 1000 }).catch((e) => e)).kind).toBe("overloaded");
   });
 });
+
+describe("Z.AI entitlement probe", () => {
+  it("treats a 'no balance / no resource package' 429 as the key not working on that endpoint", async () => {
+    const { isEntitlementError, OpenAIChatAdapter } = await import("../src/providers/openai-chat.js");
+    const { ProviderError } = await import("../src/core/types.js");
+    expect(isEntitlementError(new ProviderError("Rate limited: Insufficient balance or no resource package. Please recharge.", "rate_limit", undefined, 429))).toBe(true);
+    expect(isEntitlementError(new ProviderError("Rate limited: 余额不足或无可用资源包,请充值。", "rate_limit", undefined, 429))).toBe(true);
+    expect(isEntitlementError(new ProviderError("Rate limited: too many requests", "rate_limit", 1000, 429))).toBe(false);
+
+    const calls: string[] = [];
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: any, init: any) => {
+      calls.push(String(url));
+      const body = JSON.parse(init.body);
+      if (body.model === "paid-model") return new Response(JSON.stringify({ error: { code: "1113", message: "Insufficient balance or no resource package. Please recharge." } }), { status: 429 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: {} }), { status: 200 });
+    }) as any;
+    try {
+      const endpoint = { id: "zai-general", providerId: "zai", displayName: "z", baseUrl: "https://example.invalid/v4", protocol: "openai-chat" as const, envKeys: [] };
+      const rejected = new OpenAIChatAdapter(endpoint, "not-a-real-value", { timeoutMs: 1000, capabilityHints: {}, flavor: "zai", fallbackModels: ["paid-model", "free-model"] });
+      expect(await rejected.probe()).toBe(false); // the paid model is probed first and reveals the missing entitlement
+      const accepted = new OpenAIChatAdapter(endpoint, "not-a-real-value", { timeoutMs: 1000, capabilityHints: {}, flavor: "zai", fallbackModels: ["free-model"] });
+      expect(await accepted.probe()).toBe(true);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+});

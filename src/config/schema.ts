@@ -15,6 +15,8 @@ export interface EngineConfig {
     cacheTtlHours: number;
     /** Models to hide from selection (regex strings). */
     excludeModels: string[];
+    /** Cheap model ids per provider family, used for probes and when a models endpoint is missing. */
+    fallbackModels: Record<string, string[]>;
   };
   /** Price table keyed by "providerId/modelId" (regex allowed as the model part). */
   pricing: Record<string, ModelPricing>;
