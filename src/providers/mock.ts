@@ -133,7 +133,7 @@ export class MockProvider implements ProviderAdapter {
         { id: `c${this.calls}a`, name: "write_file", arguments: { path: "src/game.js", content: mockGameSource(req.model) } },
         { id: `c${this.calls}b`, name: "write_file", arguments: { path: "tests/game.test.js", content: mockTestSource() } },
         { id: `c${this.calls}d`, name: "write_file", arguments: { path: "index.html", content: "<!doctype html><html><body><h1>Pen Bosses</h1><ul id=\"bosses\"></ul><script type=\"module\">import { bosses, escapeHtml } from './src/game.js'; document.getElementById('bosses').innerHTML = bosses().map(b => `<li>${escapeHtml(b.name)} (hp ${b.hp})</li>`).join('');</script></body></html>\n" } },
-        { id: `c${this.calls}c`, name: "write_file", arguments: { path: "package.json", content: JSON.stringify({ name: "pen-bosses", version: "1.0.0", type: "module", scripts: { test: "node --test tests/*.test.js" } }, null, 2) } },
+        { id: `c${this.calls}c`, name: "write_file", arguments: { path: "package.json", content: JSON.stringify({ name: "pen-bosses", version: "1.0.0", type: "module", scripts: { test: "node --test tests/game.test.js" } }, null, 2) } },
       ]);
     }
     if ((stage === "do" || stage === "specialist") && toolNames.has("run_command") && wroteFiles && !ranCommand) {

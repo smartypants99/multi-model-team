@@ -7,7 +7,7 @@
     "reasoning": "high",
     "isLead": true
   },
-  "Agent F": {
+  "Agent B": {
     "memberId": "m2",
     "providerId": "mock",
     "endpointId": "mock",
@@ -15,7 +15,7 @@
     "reasoning": "high",
     "isLead": false
   },
-  "Agent B": {
+  "Agent F": {
     "memberId": "m3",
     "providerId": "mock",
     "endpointId": "mock",

@@ -1,7 +1,7 @@
 # Specialist verification — task t1
 
-- 02:15:21 **Agent F** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
-### [round 0] Agent F
+- 02:27:21 **Agent B** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
+### [round 0] Agent B
 
 Verdict: pass
 Actions: Ran npm test; Checked CLI output
@@ -16,19 +16,19 @@ I ran the thing and looked at real outputs.
 
 </details>
 
-<sub>2026-09-26T02:15:21.257Z</sub>
+<sub>2026-09-26T02:27:21.564Z</sub>
 
-### [round 1] Agent B
+### [round 1] Agent F
 
 Position: the work meets the criteria.
 
 <details><summary>Rationale:</summary>
 
-Agent B round 1: stated my position and cited evidence. Unsure whether every source is current.
+Agent F round 1: stated my position and cited evidence. Unsure whether every source is current.
 
 </details>
 
-<sub>2026-09-26T02:15:21.259Z</sub>
+<sub>2026-09-26T02:27:21.567Z</sub>
 
 ### [round 1] Agent D
 
@@ -40,7 +40,7 @@ Agent D round 1: stated my position and cited evidence. Unsure whether every sou
 
 </details>
 
-<sub>2026-09-26T02:15:21.259Z</sub>
+<sub>2026-09-26T02:27:21.567Z</sub>
 
 ### [round 1] Agent E
 
@@ -52,10 +52,10 @@ Agent E round 1: stated my position and cited evidence. Unsure whether every sou
 
 </details>
 
-<sub>2026-09-26T02:15:21.260Z</sub>
+<sub>2026-09-26T02:27:21.567Z</sub>
 
-- 02:15:21 **Agent F** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
-### [round 0] Agent F
+- 02:27:21 **Agent B** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
+### [round 0] Agent B
 
 Verdict: pass
 Actions: Ran npm test; Checked CLI output
@@ -70,5 +70,5 @@ I ran the thing and looked at real outputs.
 
 </details>
 
-<sub>2026-09-26T02:15:21.261Z</sub>
+<sub>2026-09-26T02:27:21.568Z</sub>
 
