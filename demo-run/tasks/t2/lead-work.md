@@ -1,6 +1,6 @@
 # Lead work — task t2
 
-### [round 0] Agent F
+### [round 0] Agent B
 
 mock-lead completed the task
 
@@ -12,45 +12,9 @@ I wrote the game and its tests, ran them. Unsure about recency of some sources.
 
 </details>
 
-<sub>2026-09-26T05:00:20.434Z</sub>
+<sub>2026-09-26T05:20:54.658Z</sub>
 
-### [round 2] Agent F
-
-Improvement: mock-lead completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:21.191Z</sub>
-
-### [round 2] Agent C
-
-Improvement: mock-agreeable completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:21.192Z</sub>
-
-### [round 2] Agent E
-
-Improvement: mock-vision completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:21.194Z</sub>
-
-### [round 2] Agent B
+### [round 1] Agent F
 
 Improvement: mock-critic completed the task
 
@@ -60,45 +24,9 @@ I wrote the game and its tests, ran them. Unsure about recency of some sources.
 
 </details>
 
-<sub>2026-09-26T05:00:21.198Z</sub>
+<sub>2026-09-26T05:20:55.077Z</sub>
 
-### [round 2] Agent A
-
-Improvement: mock-flaky completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:21.208Z</sub>
-
-### [round 2] Agent C
-
-Improvement: mock-agreeable completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:21.914Z</sub>
-
-### [round 2] Agent B
-
-Improvement: mock-critic completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:21.917Z</sub>
-
-### [round 2] Agent A
+### [round 1] Agent E
 
 Improvement: mock-flaky completed the task
 
@@ -108,21 +36,9 @@ I wrote the game and its tests, ran them. Unsure about recency of some sources.
 
 </details>
 
-<sub>2026-09-26T05:00:21.919Z</sub>
+<sub>2026-09-26T05:20:55.079Z</sub>
 
-### [round 2] Agent E
-
-Improvement: mock-vision completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:21.921Z</sub>
-
-### [round 2] Agent F
+### [round 1] Agent B
 
 Improvement: mock-lead completed the task
 
@@ -132,21 +48,9 @@ I wrote the game and its tests, ran them. Unsure about recency of some sources.
 
 </details>
 
-<sub>2026-09-26T05:00:21.924Z</sub>
+<sub>2026-09-26T05:20:55.081Z</sub>
 
-### [round 2] Agent B
-
-Improvement: mock-critic completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:22.635Z</sub>
-
-### [round 2] Agent E
+### [round 1] Agent D
 
 Improvement: mock-vision completed the task
 
@@ -156,33 +60,9 @@ I wrote the game and its tests, ran them. Unsure about recency of some sources.
 
 </details>
 
-<sub>2026-09-26T05:00:22.638Z</sub>
+<sub>2026-09-26T05:20:55.084Z</sub>
 
-### [round 2] Agent F
-
-Improvement: mock-lead completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:22.639Z</sub>
-
-### [round 2] Agent A
-
-Improvement: mock-flaky completed the task
-
-<details><summary>Rationale:</summary>
-
-I wrote the game and its tests, ran them. Unsure about recency of some sources.
-
-</details>
-
-<sub>2026-09-26T05:00:22.642Z</sub>
-
-### [round 2] Agent C
+### [round 1] Agent A
 
 Improvement: mock-agreeable completed the task
 
@@ -192,5 +72,125 @@ I wrote the game and its tests, ran them. Unsure about recency of some sources.
 
 </details>
 
-<sub>2026-09-26T05:00:22.647Z</sub>
+<sub>2026-09-26T05:20:55.086Z</sub>
+
+### [round 1] Agent D
+
+Improvement: mock-vision completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.461Z</sub>
+
+### [round 1] Agent B
+
+Improvement: mock-lead completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.463Z</sub>
+
+### [round 1] Agent F
+
+Improvement: mock-critic completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.465Z</sub>
+
+### [round 1] Agent E
+
+Improvement: mock-flaky completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.470Z</sub>
+
+### [round 1] Agent A
+
+Improvement: mock-agreeable completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.472Z</sub>
+
+### [round 1] Agent F
+
+Improvement: mock-critic completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.853Z</sub>
+
+### [round 1] Agent A
+
+Improvement: mock-agreeable completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.854Z</sub>
+
+### [round 1] Agent E
+
+Improvement: mock-flaky completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.856Z</sub>
+
+### [round 1] Agent B
+
+Improvement: mock-lead completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.859Z</sub>
+
+### [round 1] Agent D
+
+Improvement: mock-vision completed the task
+
+<details><summary>Rationale:</summary>
+
+I wrote the game and its tests, ran them. Unsure about recency of some sources.
+
+</details>
+
+<sub>2026-09-26T05:20:55.862Z</sub>
 

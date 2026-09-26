@@ -9,6 +9,7 @@ import { SandboxManager, SandboxError } from "../sandbox/manager.js";
 import { ResourceGuard } from "../sandbox/guard.js";
 import { needsConfirmation } from "../sandbox/destructive.js";
 import { runCommand, sandboxEnv } from "../sandbox/runner.js";
+import type { IsolationSpec } from "../sandbox/isolation.js";
 
 export interface CommandGate {
   guard: ResourceGuard;
@@ -20,6 +21,8 @@ export interface CommandGate {
   vote: (req: CommandRequest, ctx: ToolContext) => Promise<{ safe: boolean; reasons: string[] }>;
   labelOf: (memberId: string) => string;
   idOfLabel: (label: string) => string | undefined;
+  /** OS-level confinement for a member's commands, and the private TMPDIR they get. */
+  isolationFor?: (memberId: string) => { spec: IsolationSpec; tmpDir: string };
 }
 
 function relArg(args: Record<string, unknown>, key = "path"): string {
@@ -132,7 +135,8 @@ export function runCommandTool(sb: SandboxManager, gate: CommandGate): ToolDefin
       }
 
       // 3. Run with timeout and memory monitoring.
-      const res = await runCommand(req, { rssLimitMb: gate.guard.rssLimitMb(), timeoutMs, env: sandboxEnv(), groupKey: ctx.runId });
+      const iso = gate.isolationFor?.(ctx.member.id);
+      const res = await runCommand(req, { rssLimitMb: gate.guard.rssLimitMb(), timeoutMs, env: sandboxEnv(iso ? { TMPDIR: iso.tmpDir, TMP: iso.tmpDir, TEMP: iso.tmpDir } : undefined), groupKey: ctx.runId, isolation: iso?.spec });
       gate.bus.emit("command.run", { memberId: ctx.member.id, command, cwd, exitCode: res.exitCode, timedOut: res.timedOut, killedReason: res.killedReason, durationMs: res.durationMs, peakRssMb: res.peakRssMb }, { memberId: ctx.member.id, taskId: ctx.taskId });
       const head = `exit code: ${res.exitCode}${res.timedOut ? " (TIMED OUT)" : ""}${res.killedReason ? ` (killed: ${res.killedReason})` : ""} in ${res.durationMs} ms`;
       const body = [res.stdout && `--- stdout ---\n${res.stdout}`, res.stderr && `--- stderr ---\n${res.stderr}`].filter(Boolean).join("\n");

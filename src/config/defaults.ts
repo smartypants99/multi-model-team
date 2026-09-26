@@ -195,6 +195,9 @@ export function defaultConfig(): EngineConfig {
         "\\bwget\\b|\\bcurl\\b.*\\s-[oO]\\b",
         "\\bffmpeg\\b",
       ],
+      osSandbox: "auto",
+      sandboxWriteAllow: [],
+      sandboxReadDeny: [],
       destructivePatterns: [
         "\\brm\\s+(-[a-zA-Z]*[rf][a-zA-Z]*\\s+)+",
         "\\brmdir\\b",

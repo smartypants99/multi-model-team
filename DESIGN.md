@@ -373,6 +373,19 @@ independent.
   Background processes a model starts (dev servers) are remembered by
   process group per run and stopped when the run ends, so nothing outlives
   the run.
+- **OS-level sandbox for commands.** The file tools are jailed by the
+  engine, but `run_command` hands a model a real shell, and a regex
+  classifier cannot see through `python -c`, `$HOME` expansion or `curl | sh`.
+  So every sandboxed command runs under an OS sandbox when the host has one:
+  macOS `sandbox-exec` (Seatbelt profile) or Linux `bwrap` (bubblewrap).
+  Writes are allowed only inside the member's own sandbox, a private TMPDIR
+  and the usual tool caches; the engine's home (profile, tokens, checkpoints),
+  `.env` files, `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, keychains and
+  browser profiles are unreadable; the network stays open so installs and
+  searches work. Hosts without a mechanism (Windows, Linux without bwrap)
+  fall back to the classifier plus confirmation, and `mmt doctor` and the
+  run log say so plainly. `safety.osSandbox: "off"` disables it;
+  `safety.sandboxWriteAllow` / `sandboxReadDeny` extend the sets.
 - **Redaction.** Every log line and UI payload passes through a redactor
   seeded with the real key values plus generic key patterns.
 

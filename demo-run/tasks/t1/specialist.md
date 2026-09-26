@@ -1,7 +1,7 @@
 # Specialist verification — task t1
 
-- 05:00:20 **Agent B** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
-### [round 0] Agent B
+- 05:20:54 **Agent F** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
+### [round 0] Agent F
 
 Verdict: pass
 Actions: Ran npm test; Checked CLI output
@@ -16,31 +16,7 @@ I ran the thing and looked at real outputs.
 
 </details>
 
-<sub>2026-09-26T05:00:20.244Z</sub>
-
-### [round 1] Agent C
-
-Position: the work meets the criteria.
-
-<details><summary>Rationale:</summary>
-
-Agent C round 1: stated my position and cited evidence. Unsure whether every source is current.
-
-</details>
-
-<sub>2026-09-26T05:00:20.245Z</sub>
-
-### [round 1] Agent E
-
-Position: the work meets the criteria.
-
-<details><summary>Rationale:</summary>
-
-Agent E round 1: stated my position and cited evidence. Unsure whether every source is current.
-
-</details>
-
-<sub>2026-09-26T05:00:20.245Z</sub>
+<sub>2026-09-26T05:20:54.559Z</sub>
 
 ### [round 1] Agent A
 
@@ -52,10 +28,34 @@ Agent A round 1: stated my position and cited evidence. Unsure whether every sou
 
 </details>
 
-<sub>2026-09-26T05:00:20.246Z</sub>
+<sub>2026-09-26T05:20:54.561Z</sub>
 
-- 05:00:20 **Agent B** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
-### [round 0] Agent B
+### [round 1] Agent D
+
+Position: the work meets the criteria.
+
+<details><summary>Rationale:</summary>
+
+Agent D round 1: stated my position and cited evidence. Unsure whether every source is current.
+
+</details>
+
+<sub>2026-09-26T05:20:54.561Z</sub>
+
+### [round 1] Agent E
+
+Position: the work meets the criteria.
+
+<details><summary>Rationale:</summary>
+
+Agent E round 1: stated my position and cited evidence. Unsure whether every source is current.
+
+</details>
+
+<sub>2026-09-26T05:20:54.561Z</sub>
+
+- 05:20:54 **Agent F** report: verdict=pass; actions: Ran npm test; Checked CLI output; changes: Escaped brand names in render()
+### [round 0] Agent F
 
 Verdict: pass
 Actions: Ran npm test; Checked CLI output
@@ -70,5 +70,5 @@ I ran the thing and looked at real outputs.
 
 </details>
 
-<sub>2026-09-26T05:00:20.246Z</sub>
+<sub>2026-09-26T05:20:54.562Z</sub>
 

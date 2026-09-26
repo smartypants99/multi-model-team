@@ -1,12 +1,65 @@
-# diff by Agent C (m3) against best version 1 at 2026-09-26T05:00:22.658Z
-# files: src/game.js
-diff --git a<workspace>/history/v1/src/game.js b<workspace>/sandboxes/m3/src/game.js
-index 833c242..04e416f 100644
---- a<workspace>/history/v1/src/game.js
+# diff by Agent A (m3) against best version 0 at 2026-09-26T05:20:55.867Z
+# files: index.html, package.json, src/game.js, tests/game.test.js
+diff --git a<workspace>/sandboxes/m3/index.html b<workspace>/sandboxes/m3/index.html
+new file mode 100644
+index 0000000..2f0356e
+--- /dev/null
++++ b<workspace>/sandboxes/m3/index.html
+@@ -0,0 +1 @@
++<!doctype html><html><body><h1>Pen Bosses</h1><ul id="bosses"></ul><script type="module">import { bosses, escapeHtml } from './src/game.js'; document.getElementById('bosses').innerHTML = bosses().map(b => `<li>${escapeHtml(b.name)} (hp ${b.hp})</li>`).join('');</script></body></html>
+diff --git a<workspace>/sandboxes/m3/package.json b<workspace>/sandboxes/m3/package.json
+new file mode 100644
+index 0000000..5fa8962
+--- /dev/null
++++ b<workspace>/sandboxes/m3/package.json
+@@ -0,0 +1,8 @@
++{
++  "name": "pen-bosses",
++  "version": "1.0.0",
++  "type": "module",
++  "scripts": {
++    "test": "node --test tests/game.test.js"
++  }
++}
+\ No newline at end of file
+diff --git a<workspace>/sandboxes/m3/src/game.js b<workspace>/sandboxes/m3/src/game.js
+new file mode 100644
+index 0000000..04e416f
+--- /dev/null
 +++ b<workspace>/sandboxes/m3/src/game.js
-@@ -1,4 +1,4 @@
--// Pen Bosses - tiny game core (written by mock-lead in its sandbox)
+@@ -0,0 +1,12 @@
 +// Pen Bosses - tiny game core (written by mock-agreeable in its sandbox)
- export const RANKING = ["Uni-ball", "Parker", "Lamy", "Pilot", "Montblanc"];
- export function bosses(ranking = RANKING) {
-   return ranking.map((name, i) => ({ name, hp: 10 * (i + 1), damage: i + 1 }));
++export const RANKING = ["Uni-ball", "Parker", "Lamy", "Pilot", "Montblanc"];
++export function bosses(ranking = RANKING) {
++  return ranking.map((name, i) => ({ name, hp: 10 * (i + 1), damage: i + 1 }));
++}
++export function escapeHtml(s) {
++  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
++}
++export function nextBoss(list, index) {
++  if (!list.length) return null;
++  return list[index % list.length];
++}
+diff --git a<workspace>/sandboxes/m3/tests/game.test.js b<workspace>/sandboxes/m3/tests/game.test.js
+new file mode 100644
+index 0000000..838d3cf
+--- /dev/null
++++ b<workspace>/sandboxes/m3/tests/game.test.js
+@@ -0,0 +1,17 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { bosses, nextBoss, escapeHtml, RANKING } from "../src/game.js";
++
++test("bosses get harder in ranking order", () => {
++  const b = bosses();
++  for (let i = 1; i < b.length; i++) assert.ok(b[i].hp > b[i - 1].hp);
++});
++test("last boss is the best pen", () => {
++  assert.equal(bosses().at(-1).name, RANKING.at(-1));
++});
++test("empty ranking yields no boss", () => {
++  assert.equal(nextBoss([], 0), null);
++});
++test("brand names are escaped", () => {
++  assert.equal(escapeHtml("<b>"), "&lt;b&gt;");
++});

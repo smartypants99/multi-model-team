@@ -1,1 +1,0 @@
-<!doctype html><html><body><h1>Pen Bosses</h1><ul id="bosses"></ul><script type="module">import { bosses, escapeHtml } from './src/game.js'; document.getElementById('bosses').innerHTML = bosses().map(b => `<li>${escapeHtml(b.name)} (hp ${b.hp})</li>`).join('');</script></body></html>

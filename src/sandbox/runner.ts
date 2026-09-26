@@ -7,12 +7,15 @@
  */
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import type { CommandRequest, CommandResult } from "../core/types.js";
+import { wrapCommand, type IsolationSpec } from "./isolation.js";
 
 export interface RunOptions {
   rssLimitMb: number;
   timeoutMs: number;
   /** Owner of any background processes the command leaves behind (e.g. the run id); see killLeftoverProcesses. */
   groupKey?: string;
+  /** OS-level confinement (see isolation.ts). Absent = plain shell. */
+  isolation?: IsolationSpec;
   env?: Record<string, string>;
   onOutput?: (chunk: string, stream: "stdout" | "stderr") => void;
   /** Poll interval for the RSS check (ms). Default 500. */
@@ -58,7 +61,7 @@ class BoundedCapture {
   }
 }
 
-function spawnShell(command: string, cwd: string, env: Record<string, string>): ChildProcess {
+function spawnShell(command: string, cwd: string, env: Record<string, string>, isolation?: IsolationSpec): ChildProcess {
   if (process.platform === "win32") {
     const comspec = process.env.ComSpec || "cmd.exe";
     return spawn(comspec, ["/d", "/s", "/c", `"${command}"`], {
@@ -69,7 +72,8 @@ function spawnShell(command: string, cwd: string, env: Record<string, string>): 
       windowsVerbatimArguments: true,
     });
   }
-  return spawn("/bin/sh", ["-c", command], {
+  const wrapped = isolation && isolation.kind !== "none" ? wrapCommand(isolation, command, cwd) : { file: "/bin/sh", args: ["-c", command] };
+  return spawn(wrapped.file, wrapped.args, {
     cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -206,7 +210,7 @@ export function runCommand(req: CommandRequest, opts: RunOptions): Promise<Comma
   return new Promise<CommandResult>((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawnShell(req.command, req.cwd, env);
+      child = spawnShell(req.command, req.cwd, env, opts.isolation);
       if (opts.groupKey && child.pid) {
         if (!groups.has(opts.groupKey)) groups.set(opts.groupKey, new Set());
         groups.get(opts.groupKey)!.add(child.pid);

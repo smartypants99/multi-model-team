@@ -24,6 +24,8 @@ import { ResourceGuard, formatHost } from "../sandbox/guard.js";
 import { SandboxManager } from "../sandbox/manager.js";
 import { runCommand, sandboxEnv, killLeftoverProcesses } from "../sandbox/runner.js";
 import { needsConfirmation } from "../sandbox/destructive.js";
+import { detectIsolation, defaultUnreadable, defaultWritable, describeIsolation, type IsolationSpec } from "../sandbox/isolation.js";
+import { repoRoot } from "../config/load.js";
 import { searchBackendFromConfig, webSearchTool } from "../tools/search.js";
 import { fetchUrlTool } from "../tools/fetch.js";
 import { NotesStore, notesTools } from "../tools/notes.js";
@@ -243,6 +245,15 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
     const guard = new ResourceGuard(cfg.safety, host);
     const sb = new SandboxManager(workspaceRoot, runId);
     sb.init();
+    // OS-level confinement for every sandboxed command (see sandbox/isolation.ts).
+    const isoKind = cfg.safety.osSandbox === "off" ? { kind: "none" as const, reason: "disabled in config (safety.osSandbox)" } : detectIsolation();
+    const privateTmpRoot = ensureDir(path.join(workspaceRoot, runId, "tmp"));
+    const unreadable = defaultUnreadable(os.homedir(), cfg.homeDir, [path.join(repoRoot(), ".env"), path.join(repoRoot(), ".env.local"), path.join(repoRoot(), "config.local.json"), outDir, ...cfg.safety.sandboxReadDeny]);
+    const isolationFor = (memberId: string): { spec: IsolationSpec; tmpDir: string } => {
+      const tmpDir = ensureDir(path.join(privateTmpRoot, memberId));
+      return { tmpDir, spec: { kind: isoKind.kind, sandboxDir: sb.sandboxDir(memberId), writable: defaultWritable(os.homedir(), tmpDir, cfg.safety.sandboxWriteAllow), unreadable, reason: isoKind.reason } };
+    };
+    bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: describeIsolation() + (cfg.safety.osSandbox === "off" ? " (disabled in config)" : ""), rationale: "" }, { stage: "setup" });
     const notes = new NotesStore();
 
     let capApproved = false;
@@ -313,7 +324,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
 
     const search = searchBackendFromConfig(cfg.search, opts.env, opts.mock);
     const shots = screenshotTool({ mock: opts.mock, outDir: path.join(outDir, "screenshots"), resolveInSandbox: (mid, rel) => sb.resolveInside(mid, rel), sandboxRootOf: (mid) => sb.sandboxDir(mid) });
-    const gate = { guard, interaction: { ask: (q: UserQuestion) => opts.interaction.ask(q) }, bus, destructivePatterns: cfg.safety.destructivePatterns, commandTimeoutMs: cfg.safety.commandTimeoutMs, vote, labelOf, idOfLabel };
+    const gate = { guard, interaction: { ask: (q: UserQuestion) => opts.interaction.ask(q) }, bus, destructivePatterns: cfg.safety.destructivePatterns, commandTimeoutMs: cfg.safety.commandTimeoutMs, vote, labelOf, idOfLabel, isolationFor };
     const allTools: Record<string, ToolDefinition> = {};
     if (search) allTools.web_search = webSearchTool(search, cfg.search.maxResults);
     allTools.fetch_url = fetchUrlTool({ mock: opts.mock });
@@ -688,7 +699,8 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           bus.emit("resource.check", { command: script, decision: "block", reason: `test suite of ${labelOf(memberId)} refused: ${reason}` }, { stage: "compete", taskId: task.id, memberId });
           return makeTestRun(suite.command, hash, { exitCode: null, stdout: "", stderr: `refused: ${reason}`, timedOut: false, durationMs: 0 }, [{ name: "suite", passed: false, output: `refused: ${reason}` }]);
         }
-        const res = await runCommand({ command: suite.command, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs }, { rssLimitMb: guard.rssLimitMb(), timeoutMs: cfg.safety.commandTimeoutMs, env: sandboxEnv(), groupKey: runId });
+        const iso = isolationFor(memberId);
+        const res = await runCommand({ command: suite.command, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs }, { rssLimitMb: guard.rssLimitMb(), timeoutMs: cfg.safety.commandTimeoutMs, env: sandboxEnv({ TMPDIR: iso.tmpDir, TMP: iso.tmpDir, TEMP: iso.tmpDir }), groupKey: runId, isolation: iso.spec });
         bus.emit("command.run", { memberId, command: suite.command, cwd: dir, exitCode: res.exitCode, timedOut: res.timedOut, killedReason: res.killedReason, durationMs: res.durationMs }, { stage: "compete", taskId: task.id, memberId });
         return makeTestRun(suite.command, hash, res, parseTestOutput(suite.kind, res));
       }

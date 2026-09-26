@@ -66,6 +66,12 @@ export interface EngineConfig {
     heavyCommandPatterns: string[];
     /** Regexes that mark a command as destructive. */
     destructivePatterns: string[];
+    /** OS-level sandbox for run_command: "auto" uses sandbox-exec (macOS) or bwrap (Linux) when available; "off" disables it. */
+    osSandbox: "auto" | "off";
+    /** Extra paths sandboxed commands may write to (tool caches, build dirs). */
+    sandboxWriteAllow: string[];
+    /** Extra paths sandboxed commands must not read (besides the built-in secret folders). */
+    sandboxReadDeny: string[];
   };
   search: {
     provider: "mock" | "tavily" | "brave" | "serper" | "none";

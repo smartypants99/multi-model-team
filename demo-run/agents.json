@@ -1,5 +1,5 @@
 {
-  "Agent F": {
+  "Agent B": {
     "memberId": "m1",
     "providerId": "mock",
     "endpointId": "mock",
@@ -7,7 +7,7 @@
     "reasoning": "high",
     "isLead": true
   },
-  "Agent B": {
+  "Agent F": {
     "memberId": "m2",
     "providerId": "mock",
     "endpointId": "mock",
@@ -15,7 +15,7 @@
     "reasoning": "high",
     "isLead": false
   },
-  "Agent C": {
+  "Agent A": {
     "memberId": "m3",
     "providerId": "mock",
     "endpointId": "mock",
@@ -23,7 +23,7 @@
     "reasoning": "high",
     "isLead": false
   },
-  "Agent E": {
+  "Agent D": {
     "memberId": "m4",
     "providerId": "mock",
     "endpointId": "mock",
@@ -31,7 +31,7 @@
     "reasoning": "high",
     "isLead": false
   },
-  "Agent A": {
+  "Agent E": {
     "memberId": "m5",
     "providerId": "mock",
     "endpointId": "mock",
@@ -39,7 +39,7 @@
     "reasoning": "none",
     "isLead": false
   },
-  "Agent D": {
+  "Agent C": {
     "memberId": "m6",
     "providerId": "mock",
     "endpointId": "mock",

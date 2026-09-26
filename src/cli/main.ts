@@ -353,6 +353,8 @@ async function cmdDoctor(loaded: ReturnType<typeof loadConfig>, mock: boolean): 
   line(true, "cost cap", loaded.config.cost.capUsd === null ? "none (set cost.capUsd or MMT_COST_CAP_USD)" : `$${loaded.config.cost.capUsd}`);
   const host = await detectHostResources();
   line(true, "host", formatHost(host));
+  const { detectIsolation, describeIsolation } = await import("../sandbox/isolation.js");
+  line(detectIsolation().kind !== "none", "os sandbox", describeIsolation());
   process.stdout.write("\nProviders (probing endpoints, may take a moment)...\n");
   const r = await detectProviders({ config: loaded.config, env: loaded.env, mock });
   for (const n of r.notes) process.stdout.write(`note  ${n}\n`);
