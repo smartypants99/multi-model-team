@@ -132,7 +132,11 @@ When the run ends:
    - where the outputs are (`<outDir>/output/`) and where the logs are
      (`<outDir>/events.jsonl`, `<outDir>/transcript.md`, the dashboard URL);
    - total cost (`totalCostUsd`) and, for `failed` or `stopped`, the reason
-     from the transcript;
+     from the transcript. If the run was interrupted (a network outage, a
+     model that dropped out, the machine went to sleep), tell the user it can
+     be continued without redoing finished tasks:
+     `node "${CLAUDE_PLUGIN_ROOT}/dist/cli/main.js" run --resume <runId> --detach`
+     (then the same wait/answer loop);
    - any open objections or dissent the models recorded that were not resolved.
 
 Never paste API keys or full environment dumps into the summary.
