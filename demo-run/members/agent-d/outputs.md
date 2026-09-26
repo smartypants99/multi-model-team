@@ -1,118 +1,120 @@
 # Outputs of Agent D
 
-## verification / t1 / round 0 — 2026-09-26T05:20:53.160Z
+## verification / t1 / round 0 — 2026-09-26T05:21:51.043Z
 
-Verdict: pass
-- [info] Acceptance criteria appear to be met. (evidence: tests pass)
+Verdict: needs-work
+- [major] Boss ordering is not tied to the research ranking; it is hard-coded. (evidence: src/game.js line 3)
+- [minor] One source is a retailer page, not an independent review. (evidence: Sources section item 4)
 
-## discussion / t1 / round 1 — 2026-09-26T05:20:54.523Z
+## discussion / t1 / round 1 — 2026-09-26T05:21:52.509Z
 
-Position: the work meets the criteria.
+My independent position: the work is close but the boss order must be derived from the ranking data, not hard-coded. Evidence: src/game.js line 3.
 
-## discussion / t1 / round 2 — 2026-09-26T05:20:54.533Z
-
-Position: the work meets the criteria; the hard-coded order concern was addressed by deriving bosses from the ranking list.
-
-## discussion / t1 / round 3 — 2026-09-26T05:20:54.540Z
-
-As devil's advocate I argue the current consensus is too comfortable: the ranking rests on few sources and the boss difficulty curve is untested at the top end.
-
-## meeting / t1 / round 1 — 2026-09-26T05:20:54.547Z
-
-Approve the proposed changes.
-
-## meeting / t1 / round 2 — 2026-09-26T05:20:54.552Z
-
-Approve the proposed changes.
-
-## meeting / t1 / round 3 — 2026-09-26T05:20:54.556Z
-
-Approve the proposed changes.
-
-## specialist / t1 / round 1 — 2026-09-26T05:20:54.561Z
-
-Position: the work meets the criteria.
-
-## verification / t2 / round 0 — 2026-09-26T05:20:54.679Z
-
-Verdict: pass
-- [info] Acceptance criteria appear to be met. (evidence: tests pass)
-
-## discussion / t2 / round 1 — 2026-09-26T05:20:54.681Z
-
-Position: the work meets the criteria.
-
-## discussion / t2 / round 2 — 2026-09-26T05:20:54.684Z
-
-As devil's advocate I argue the current consensus is too comfortable: the ranking rests on few sources and the boss difficulty curve is untested at the top end.
-
-## discussion / t2 / round 3 — 2026-09-26T05:20:54.686Z
+## discussion / t1 / round 2 — 2026-09-26T05:21:52.517Z
 
 Position: the work meets the criteria; the hard-coded order concern was addressed by deriving bosses from the ranking list.
 
-## red-team / t2 / round 0 — 2026-09-26T05:20:54.959Z
+## discussion / t1 / round 3 — 2026-09-26T05:21:52.525Z
 
-→ Agent B
-- [major/edge-case] Empty ranking list makes the game spawn zero bosses and the loop never ends. @ src/game.js nextBoss()
-- [minor/security] Brand names are inserted into the DOM without escaping. @ src/game.js render()
+Position: the work meets the criteria; the hard-coded order concern was addressed by deriving bosses from the ranking list.
 
-## red-team / t2 / round 0 — 2026-09-26T05:20:54.963Z
+## meeting / t1 / round 1 — 2026-09-26T05:21:52.534Z
+
+I want the escaping fix included before we approve.
+
+## meeting / t1 / round 2 — 2026-09-26T05:21:52.537Z
+
+I want the escaping fix included before we approve.
+
+## meeting / t1 / round 3 — 2026-09-26T05:21:52.541Z
+
+I want the escaping fix included before we approve.
+
+## specialist / t1 / round 0 — 2026-09-26T05:21:52.545Z
+
+Verdict: pass
+Actions: Ran npm test; Checked CLI output
+Changes applied: Escaped brand names in render()
+Findings:
+- [info] Tests pass; title screen renders boss list.
+Suggested next checks: Check behaviour with an empty ranking
+
+## specialist / t1 / round 0 — 2026-09-26T05:21:52.548Z
+
+Verdict: pass
+Actions: Ran npm test; Checked CLI output
+Changes applied: Escaped brand names in render()
+Findings:
+- [info] Tests pass; title screen renders boss list.
+Suggested next checks: Check behaviour with an empty ranking
+
+## verification / t2 / round 0 — 2026-09-26T05:21:52.775Z
+
+Verdict: needs-work
+- [major] Boss ordering is not tied to the research ranking; it is hard-coded. (evidence: src/game.js line 3)
+- [minor] One source is a retailer page, not an independent review. (evidence: Sources section item 4)
+
+## discussion / t2 / round 1 — 2026-09-26T05:21:52.779Z
+
+My independent position: the work is close but the boss order must be derived from the ranking data, not hard-coded. Evidence: src/game.js line 3.
+
+## discussion / t2 / round 2 — 2026-09-26T05:21:52.780Z
+
+Position: the work meets the criteria; the hard-coded order concern was addressed by deriving bosses from the ranking list.
+
+## discussion / t2 / round 3 — 2026-09-26T05:21:52.783Z
+
+Position: the work meets the criteria; the hard-coded order concern was addressed by deriving bosses from the ranking list.
+
+## red-team / t2 / round 0 — 2026-09-26T05:21:53.286Z
 
 → Agent F
 - [major/edge-case] Empty ranking list makes the game spawn zero bosses and the loop never ends. @ src/game.js nextBoss()
 - [minor/security] Brand names are inserted into the DOM without escaping. @ src/game.js render()
 
-## red-team / t2 / round 0 — 2026-09-26T05:20:54.968Z
+## red-team / t2 / round 0 — 2026-09-26T05:21:53.290Z
+
+→ Agent C
+- [major/edge-case] Empty ranking list makes the game spawn zero bosses and the loop never ends. @ src/game.js nextBoss()
+- [minor/security] Brand names are inserted into the DOM without escaping. @ src/game.js render()
+
+## red-team / t2 / round 0 — 2026-09-26T05:21:53.295Z
 
 → Agent A
 - [major/edge-case] Empty ranking list makes the game spawn zero bosses and the loop never ends. @ src/game.js nextBoss()
 - [minor/security] Brand names are inserted into the DOM without escaping. @ src/game.js render()
 
-## red-team / t2 / round 0 — 2026-09-26T05:20:54.972Z
+## red-team / t2 / round 0 — 2026-09-26T05:21:53.299Z
 
 → Agent E
 - [major/edge-case] Empty ranking list makes the game spawn zero bosses and the loop never ends. @ src/game.js nextBoss()
 - [minor/security] Brand names are inserted into the DOM without escaping. @ src/game.js render()
 
-## lead / t2 / round 1 — 2026-09-26T05:20:55.084Z
+## lead / t2 / round 2 — 2026-09-26T05:21:53.569Z
 
-Improvement: mock-vision completed the task
+Improvement: mock-critic completed the task
 
-## lead / t2 / round 1 — 2026-09-26T05:20:55.461Z
+## lead / t2 / round 2 — 2026-09-26T05:21:54.332Z
 
-Improvement: mock-vision completed the task
+Improvement: mock-critic completed the task
 
-## lead / t2 / round 1 — 2026-09-26T05:20:55.862Z
+## lead / t2 / round 2 — 2026-09-26T05:21:55.099Z
 
-Improvement: mock-vision completed the task
+Improvement: mock-critic completed the task
 
-## meeting / t2 / round 1 — 2026-09-26T05:20:56.145Z
+## meeting / t2 / round 1 — 2026-09-26T05:21:55.607Z
 
-Approve the proposed changes.
+I want the escaping fix included before we approve.
 
-## meeting / t2 / round 2 — 2026-09-26T05:20:56.147Z
+## meeting / t2 / round 2 — 2026-09-26T05:21:55.609Z
 
-Approve the proposed changes.
+I want the escaping fix included before we approve.
 
-## meeting / t2 / round 3 — 2026-09-26T05:20:56.149Z
+## meeting / t2 / round 3 — 2026-09-26T05:21:55.611Z
 
-Approve the proposed changes.
+I want the escaping fix included before we approve.
 
-## specialist / t2 / round 0 — 2026-09-26T05:20:56.227Z
+## specialist / t2 / round 1 — 2026-09-26T05:21:55.796Z
 
-Verdict: pass
-Actions: Ran npm test; Captured and inspected a screenshot of the title screen
-Changes applied: Escaped brand names in render()
-Findings:
-- [info] Tests pass; title screen renders boss list.
-Suggested next checks: Check behaviour with an empty ranking
-
-## specialist / t2 / round 0 — 2026-09-26T05:20:56.308Z
-
-Verdict: pass
-Actions: Ran npm test; Captured and inspected a screenshot of the title screen
-Changes applied: Escaped brand names in render()
-Findings:
-- [info] Tests pass; title screen renders boss list.
-Suggested next checks: Check behaviour with an empty ranking
+My independent position: the work is close but the boss order must be derived from the ranking data, not hard-coded. Evidence: src/game.js line 3.
 

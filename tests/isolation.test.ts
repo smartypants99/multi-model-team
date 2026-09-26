@@ -9,11 +9,11 @@ const avail = detectIsolation();
 
 describe("OS isolation", () => {
   it("builds a profile that confines writes and hides secrets", () => {
-    const spec = { kind: "seatbelt" as const, sandboxDir: "/tmp/sb", writable: ["/tmp/cache"], unreadable: ["/home/u/.ssh"] };
+    const spec = { kind: "seatbelt" as const, sandboxDir: "/tmp/sb", writable: ["/tmp/cache"], unreadable: ["/srv/agent/.ssh"] };
     const prof = seatbeltProfile(spec);
     expect(prof).toContain("(deny file-write*)");
     expect(prof).toContain('(allow file-write* (subpath "/tmp/sb"))');
-    expect(prof).toContain('(deny file-read* (subpath "/home/u/.ssh"))');
+    expect(prof).toContain('(deny file-read* (subpath "/srv/agent/.ssh"))');
     const bw = bwrapArgs({ ...spec, kind: "bwrap" }, "/tmp/sb");
     expect(bw.slice(0, 3)).toEqual(["--ro-bind", "/", "/"]);
   });

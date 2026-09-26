@@ -58,7 +58,14 @@ export function resetIsolationCache(): void {
 export function defaultUnreadable(homeDir: string, engineHome: string, extra: string[] = []): string[] {
   const h = homeDir;
   const list = [
-    engineHome, // profile, run-control tokens, checkpoints, .cli-tmp
+    // Engine state that holds tokens, keys or selections; the workspaces under engineHome stay readable.
+    path.join(engineHome, "profile.json"),
+    path.join(engineHome, "run-control"),
+    path.join(engineHome, "runs"),
+    path.join(engineHome, "model-cache.json"),
+    path.join(engineHome, ".cli-tmp"),
+    path.join(engineHome, ".env"),
+    path.join(engineHome, "config.json"),
     path.join(h, ".ssh"),
     path.join(h, ".aws"),
     path.join(h, ".gnupg"),
