@@ -8,8 +8,28 @@ export interface CancellableInteraction extends Interaction {
   cancel(questionId: string): void;
 }
 
+/**
+ * Safe answers when nobody can be asked (stdin is not a terminal and there is
+ * no other channel): destructive commands are denied, the cost cap stops the
+ * run, model selection goes to auto, clarifications get "use your judgement".
+ */
+export function unattendedAnswer(q: UserQuestion): UserAnswer {
+  switch (q.kind) {
+    case "clarify":
+      return { questionId: q.id, text: "Use your best judgement and state your assumption." };
+    case "select-model":
+      return { questionId: q.id, text: "auto", data: { mode: "auto" } };
+    case "confirm-destructive":
+    case "resource-block":
+      return { questionId: q.id, text: "denied (unattended run: nobody could confirm)", approved: false };
+    case "cost-cap":
+      return { questionId: q.id, text: "stop (unattended run: nobody could approve more spending)", approved: false };
+  }
+}
+
 export function terminalInteraction(out: NodeJS.WriteStream = process.stdout, input: NodeJS.ReadStream = process.stdin): CancellableInteraction {
   const open = new Map<string, readline.Interface>();
+  const interactive = !!(input as any).isTTY;
   let current: string | undefined;
   const prompt = (text: string) =>
     new Promise<string>((resolve, reject) => {
@@ -35,6 +55,11 @@ export function terminalInteraction(out: NodeJS.WriteStream = process.stdout, in
       }
     },
     async ask(q: UserQuestion): Promise<UserAnswer> {
+      if (!interactive) {
+        const a = unattendedAnswer(q);
+        out.write(`\n? ${q.text}\n  -> ${a.text} (stdin is not a terminal; answer from the dashboard to override)\n`);
+        return a;
+      }
       current = q.id;
       out.write(`\n\x1b[36m? ${q.text}\x1b[0m\n`);
       switch (q.kind) {

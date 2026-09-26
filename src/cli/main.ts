@@ -13,13 +13,13 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadConfig, repoRoot } from "../config/load.js";
 import { Engine, statusFromEvents, levelsOf } from "./engine.js";
-import { terminalInteraction } from "./terminal.js";
+import { terminalInteraction, unattendedAnswer } from "./terminal.js";
 import { DashboardServer } from "../ui/server.js";
 import { openBrowser } from "../ui/open-browser.js";
 import { parseModelOverrides, loadProfile } from "../providers/selection.js";
 import { readRunEvents } from "../logging/replay.js";
 import { newRunId } from "../pipeline/run.js";
-import type { UserAnswer } from "../core/types.js";
+import type { UserAnswer, UserQuestion } from "../core/types.js";
 
 interface Args {
   _: string[];
@@ -165,7 +165,9 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   if (!args.flags["no-ui"] || isChild) {
     server = await startServer(engine, loaded.config.ui.port);
   }
-  const terminal = isChild ? undefined : terminalInteraction();
+  // Plain CLI runs answer on the terminal. A detached child has no terminal: its questions wait for the dashboard/CLI,
+  // unless MMT_UNATTENDED=1 asks for the safe automatic answers.
+  const terminal = isChild ? (process.env.MMT_UNATTENDED === "1" ? { ask: async (q: UserQuestion) => unattendedAnswer(q) } : undefined) : terminalInteraction();
   const live = engine.startRun({ request, mock, outDir, overrides, autoAnswer: !!args.flags.yes, reselect: !!args.flags.reselect, runId, terminal });
   if (isChild) armChildLifetime(Number(process.env.MMT_DETACHED_MAX_HOURS ?? 12), () => { engine.control(live.runId, "stop"); setTimeout(() => process.exit(0), 5000).unref(); });
   const dashboard = server ? `${server.url()}#/run/${live.runId}` : undefined;

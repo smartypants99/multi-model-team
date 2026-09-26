@@ -338,7 +338,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         return parts.join("\n\n") || "(nothing yet)";
       };
       const sandboxNote = wt.workspace === "sandbox"
-        ? `You work in your own isolated sandbox (relative paths). You can read other agents' sandboxes with read_other_sandbox but only write to your own. Every command has a timeout; heavy commands need a resource estimate. Host: ${formatHost(host)}.`
+        ? `You work in your own isolated sandbox; all paths are relative to its root (use "." for the root, never "..", absolute paths or other agents' names as paths). After the lead finishes, your sandbox already contains a full copy of the lead's work, so run tests and inspect files directly here. You can read other agents' sandboxes with read_other_sandbox (read-only); you can only write to your own. Every command has a timeout; heavy commands need a resource estimate. Host: ${formatHost(host)}.`
         : "This task produces a document, not files. Keep drafts and sources in your notes.";
       const common = (m: TeamMember, extra = "") => ({
         request: opts.request, spec: P.specText(spec), plan: P.planText(plan.tasks), task_title: task.title, task_description: task.description + (task.workTypeFallbackNote ? `\n(Note: ${task.workTypeFallbackNote})` : ""),
