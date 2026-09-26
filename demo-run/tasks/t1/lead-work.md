@@ -1,6 +1,6 @@
 # Lead work — task t1
 
-### [round 0] Agent D
+### [round 0] Agent F
 
 mock-lead completed the task
 
@@ -12,9 +12,9 @@ I searched for sources and ranked the brands. Unsure about recency of some sourc
 
 </details>
 
-<sub>2026-09-26T04:43:16.077Z</sub>
+<sub>2026-09-26T05:00:18.921Z</sub>
 
-### [round 1] Agent D
+### [round 1] Agent F
 
 Final version:
 
@@ -39,5 +39,5 @@ I searched for sources and ranked the brands. Unsure about recency of some sourc
 
 </details>
 
-<sub>2026-09-26T04:43:16.690Z</sub>
+<sub>2026-09-26T05:00:20.247Z</sub>
 

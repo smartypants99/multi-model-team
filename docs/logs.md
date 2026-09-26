@@ -6,6 +6,7 @@ into each run folder. Secrets are redacted before anything touches disk.
 
 ```
 run.json                 id, request, started/finished, status, mock flag, config summary
+checkpoint.json          spec, plan and completed tasks, written as the run progresses; `mmt run --resume <runId>` continues from it
 events.jsonl             every event, one JSON object per line — the machine-readable source of truth
 agents.json              anonymous label -> real provider/model/reasoning (humans and the UI only)
 spec.md  spec.json       the spec the lead wrote after clarifying

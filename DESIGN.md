@@ -428,6 +428,17 @@ is pending; `mmt answer` posts to the same API. Status is derived purely from
 the event stream, so it works identically for live runs and for finished runs
 read from `events.jsonl`. The Claude Code skill loops on wait/ask/answer.
 
+## 14c. Checkpoints and resume
+
+Real runs are expensive and long, so the orchestrator writes
+`checkpoint.json` after the spec, after the plan and after every completed
+task (output, status, crowned snapshot and its test run). `mmt run --resume
+<runId>` starts a new run whose spec, plan and finished tasks are replayed
+from that file (their events are re-emitted with `resumed: true`), so only
+the unfinished tasks cost anything. The team is rebuilt from the saved
+profile; the crowned snapshots live in the persistent workspace folder, so
+later tasks can still seed their sandboxes from them.
+
 ## 15. Cost control
 
 No cap by default. `cost.capUsd` (config or `MMT_COST_CAP_USD`) pauses the run

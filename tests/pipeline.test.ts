@@ -138,3 +138,32 @@ describe("example-minimal work type and interaction", () => {
     expect(bus.all().some((e) => e.type === "question.asked" && (e.data.question as any).kind === "cost-cap")).toBe(true);
   }, 120_000);
 });
+
+describe("resume from checkpoint", () => {
+  it("skips tasks completed by an interrupted run", async () => {
+    const c = cfg();
+    const first = new EventBus("resume-1");
+    const control = new RunControl();
+    const out1 = path.join(tmp, "run-resume-1");
+    // Stop as soon as the first task finishes.
+    first.on((e) => { if (e.type === "task.finished") control.stop(); });
+    const r1 = await runPipeline({ request: "research the top pen brands and make a game with better pens being bosses", config: c, env: {}, mock: true, interaction: autoInteraction, outDir: out1, workspaceRoot: path.join(tmp, "ws-resume"), bus: first, runId: "resume-1", autoAnswer: true }, control);
+    expect(r1.status).toBe("stopped");
+    expect(fs.existsSync(path.join(out1, "checkpoint.json"))).toBe(true);
+    const cp = JSON.parse(fs.readFileSync(path.join(out1, "checkpoint.json"), "utf8"));
+    expect(cp.done.map((d: any) => d.taskId)).toEqual(["t1"]);
+
+    const second = new EventBus("resume-2");
+    const r2 = await runPipeline({ request: "research the top pen brands and make a game with better pens being bosses", config: c, env: {}, mock: true, interaction: autoInteraction, outDir: path.join(tmp, "run-resume-2"), workspaceRoot: path.join(tmp, "ws-resume"), bus: second, runId: "resume-2", autoAnswer: true, resumeFrom: out1 });
+    expect(r2.status, r2.error).toBe("ok");
+    const ev = second.all();
+    expect(ev.find((e) => e.type === "spec.written")!.data.resumed).toBe(true);
+    expect(ev.find((e) => e.type === "plan.written")!.data.resumed).toBe(true);
+    const started = ev.filter((e) => e.type === "task.started");
+    expect(started.map((e) => [e.taskId, !!e.data.resumed])).toEqual([["t1", true], ["t2", false]]);
+    // Only the second task did real work (no lead "do" call for t1).
+    expect(ev.filter((e) => e.type === "llm.call" && e.taskId === "t1").length).toBe(0);
+    expect(ev.filter((e) => e.type === "llm.call" && e.taskId === "t2").length).toBeGreaterThan(0);
+    expect(Object.keys(r2.outputs).sort()).toEqual(["t1", "t2"]);
+  }, 300_000);
+});

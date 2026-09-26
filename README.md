@@ -163,6 +163,7 @@ node dist/cli/main.js run --detach --request "..."   # background run; then:
 node dist/cli/main.js wait <runId>   # block until finished or a question is pending
 node dist/cli/main.js answer <runId> <questionId> "text"
 node dist/cli/main.js stop <runId>   # also pause / resume
+node dist/cli/main.js run --resume <runId>   # continue an interrupted run; finished tasks are not redone
 node dist/cli/main.js --help
 ```
 
@@ -217,6 +218,7 @@ Create `work-types/<name>/worktype.json` and the prompt files it references, or 
 - **Screenshots say Playwright is unavailable**: install it in the environment the engine runs in; until then visual verification falls back to execution verification.
 - **Windows**: use PowerShell or cmd; paths with spaces are fine. If `node` is not found by the hook, make sure it is on the PATH used by Claude Code.
 - **A model keeps failing**: it is disabled for the run with a logged reason; the run continues while at least two models remain.
+- **The run was interrupted** (network outage, machine slept, process killed): `node dist/cli/main.js run --resume <runId>` picks up from the last checkpoint, skipping the spec, plan and every task that already finished.
 
 ## Contributing
 

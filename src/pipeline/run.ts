@@ -52,6 +52,47 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** Test hook: replace provider detection. */
   detect?: typeof detectProviders;
+  /** Log folder of an earlier run whose checkpoint.json should be continued (completed tasks are skipped). */
+  resumeFrom?: string;
+}
+
+/** Written after the spec, the plan and every completed task, so an interrupted run can be resumed. */
+export interface Checkpoint {
+  version: 1;
+  request: string;
+  spec?: Spec;
+  plan?: Plan;
+  done: { taskId: string; workType: string; output: string; status: string; bestSnapshotDir?: string; bestVersion?: number; bestTestRun?: TestRun; outputPath?: string }[];
+  updatedAt: string;
+}
+
+/** Checkpoints store paths relative to the home directory ("~/...") so committed run folders never carry a user name. */
+function homeAlias(p: string | undefined): string | undefined {
+  if (!p) return p;
+  const home = os.homedir();
+  return p.startsWith(home) ? "~" + p.slice(home.length).replace(/\\/g, "/") : p;
+}
+function homeExpand(p: string | undefined): string | undefined {
+  if (!p) return p;
+  return p.startsWith("~/") ? path.join(os.homedir(), ...p.slice(2).split("/")) : p;
+}
+
+export function writeCheckpoint(dir: string, cp: Checkpoint): void {
+  const out: Checkpoint = { ...cp, updatedAt: new Date().toISOString(), done: cp.done.map((d) => ({ ...d, bestSnapshotDir: homeAlias(d.bestSnapshotDir), outputPath: homeAlias(d.outputPath) })) };
+  fs.writeFileSync(path.join(dir, "checkpoint.json"), JSON.stringify(out, null, 2));
+}
+
+export function readCheckpoint(dir: string): Checkpoint | undefined {
+  const file = path.join(dir, "checkpoint.json");
+  if (!fs.existsSync(file)) return undefined;
+  try {
+    const cp = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!cp || cp.version !== 1) return undefined;
+    cp.done = (cp.done ?? []).map((d: any) => ({ ...d, bestSnapshotDir: homeExpand(d.bestSnapshotDir), outputPath: homeExpand(d.outputPath) }));
+    return cp as Checkpoint;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface RunResult {
@@ -152,7 +193,11 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
   };
   const qid = () => `q-${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`;
 
-  bus.emit("run.started", { request: opts.request, mock: opts.mock, configSummary: { maxDiscussionRounds: cfg.pipeline.maxDiscussionRounds, stallLimit: cfg.pipeline.stallLimit, costCapUsd: cfg.cost.capUsd, search: cfg.search.provider } });
+  const resumed = opts.resumeFrom ? readCheckpoint(opts.resumeFrom) : undefined;
+  if (opts.resumeFrom && !resumed) throw new Error(`No usable checkpoint.json in ${opts.resumeFrom}`);
+  const checkpoint: Checkpoint = resumed ?? { version: 1, request: opts.request, done: [], updatedAt: "" };
+  const saveCheckpoint = () => writeCheckpoint(outDir, checkpoint);
+  bus.emit("run.started", { request: opts.request, mock: opts.mock, resumedFrom: opts.resumeFrom, configSummary: { maxDiscussionRounds: cfg.pipeline.maxDiscussionRounds, stallLimit: cfg.pipeline.stallLimit, costCapUsd: cfg.cost.capUsd, search: cfg.search.provider } });
 
   try {
     // ------------------------------------------------------------------ setup
@@ -286,7 +331,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
     // ---------------------------------------------------------------- clarify
     stage("clarify");
     const clarifications: Spec["clarifications"] = [];
-    const clar = await llm.callJson<{ questions: string[]; ready: boolean }>({ member: lead, stage: "clarify", system: P.clarifyPrompt(lead.label, teamLabels()), messages: [textMessage("user", `Request: ${opts.request}`)], tag: "clarify" });
+    const clar = checkpoint.spec ? { json: { questions: [] as string[], ready: true } } : await llm.callJson<{ questions: string[]; ready: boolean }>({ member: lead, stage: "clarify", system: P.clarifyPrompt(lead.label, teamLabels()), messages: [textMessage("user", `Request: ${opts.request}`)], tag: "clarify" });
     for (const q of (clar.json.questions ?? []).slice(0, 4)) {
       if (!clar.json.ready || true) {
         const a = opts.autoAnswer ? { questionId: "", text: "Use your best judgement and state your assumption." } : await ask({ id: qid(), kind: "clarify", text: q });
@@ -298,15 +343,23 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         }
       }
     }
-    const specRes = await llm.callJson<Omit<Spec, "request" | "clarifications">>({ member: lead, stage: "clarify", system: P.specPrompt(lead.label, teamLabels()), messages: [textMessage("user", `Request: ${opts.request}\n\nClarifications:\n${clarifications.map((c) => `Q: ${c.question}\nA: ${c.answer}`).join("\n") || "(none)"}`)], tag: "spec" });
-    const spec: Spec = { request: opts.request, clarifications, summary: String(specRes.json.summary ?? ""), goals: arr(specRes.json.goals), constraints: arr(specRes.json.constraints), outOfScope: arr(specRes.json.outOfScope) };
+    let spec: Spec;
+    if (checkpoint.spec) {
+      spec = checkpoint.spec;
+      bus.emit("spec.written", { spec, resumed: true }, { stage: "clarify" });
+    } else {
+      const specRes = await llm.callJson<Omit<Spec, "request" | "clarifications">>({ member: lead, stage: "clarify", system: P.specPrompt(lead.label, teamLabels()), messages: [textMessage("user", `Request: ${opts.request}\n\nClarifications:\n${clarifications.map((c) => `Q: ${c.question}\nA: ${c.answer}`).join("\n") || "(none)"}`)], tag: "spec" });
+      spec = { request: opts.request, clarifications, summary: String(specRes.json.summary ?? ""), goals: arr(specRes.json.goals), constraints: arr(specRes.json.constraints), outOfScope: arr(specRes.json.outOfScope) };
+      bus.emit("spec.written", { spec }, { stage: "clarify" });
+      checkpoint.spec = spec;
+      saveCheckpoint();
+    }
     result.spec = spec;
-    bus.emit("spec.written", { spec }, { stage: "clarify" });
 
     // ------------------------------------------------------------------- plan
     stage("plan");
     const wtList = [...workTypes.values()];
-    const planRes = await llm.callJson<Plan>({ member: lead, stage: "plan", system: P.planPrompt(lead.label, teamLabels(), wtList), messages: [textMessage("user", `Request: ${opts.request}\n\nSpec:\n${P.specText(spec)}`)], tag: "plan" }, (o) => (Array.isArray(o.tasks) && o.tasks.length ? undefined : "tasks must be a non-empty array"));
+    const planRes = checkpoint.plan ? { json: { tasks: checkpoint.plan.tasks.map((t) => ({ ...t })), notes: checkpoint.plan.notes } as any } : await llm.callJson<Plan>({ member: lead, stage: "plan", system: P.planPrompt(lead.label, teamLabels(), wtList), messages: [textMessage("user", `Request: ${opts.request}\n\nSpec:\n${P.specText(spec)}`)], tag: "plan" }, (o) => (Array.isArray(o.tasks) && o.tasks.length ? undefined : "tasks must be a non-empty array"));
     const plan: Plan = { tasks: [], notes: arr(planRes.json.notes) };
     planRes.json.tasks.forEach((t: any, i: number) => {
       const requested = String(t.workType ?? "");
@@ -320,11 +373,29 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       plan.tasks.push({ id: String(t.id ?? `t${i + 1}`), title: String(t.title ?? `Task ${i + 1}`), description: String(t.description ?? ""), workType: wtName, workTypeFallbackNote: note, acceptanceCriteria: arr(t.acceptanceCriteria), dependsOn: arr(t.dependsOn) });
     });
     result.plan = plan;
-    bus.emit("plan.written", { plan }, { stage: "plan" });
+    bus.emit("plan.written", { plan, resumed: !!checkpoint.plan }, { stage: "plan" });
+    if (!checkpoint.plan) {
+      checkpoint.plan = plan;
+      saveCheckpoint();
+    }
 
     // ------------------------------------------------------------------ tasks
     const done: TaskState[] = [];
+    // Tasks completed by the run being resumed are replayed from the checkpoint, not redone.
+    for (const d of checkpoint.done) {
+      const task = plan.tasks.find((t) => t.id === d.taskId);
+      const wt = task && workTypes.get(task.workType);
+      if (!task || !wt) continue;
+      const bestOk = d.bestSnapshotDir && fs.existsSync(d.bestSnapshotDir);
+      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map() };
+      if (bestOk && d.bestTestRun) st.best = { version: d.bestVersion ?? 1, fromMemberId: "resumed", crownedAt: d.status, taskId: task.id, testRun: d.bestTestRun, snapshotDir: d.bestSnapshotDir!, reason: "resumed from checkpoint" };
+      bus.emit("task.started", { task, resumed: true }, { taskId: task.id });
+      bus.emit("task.finished", { taskId: task.id, status: d.status, summary: d.output.slice(0, 2000), resumed: true }, { taskId: task.id });
+      if (d.outputPath) result.outputs[task.id] = d.outputPath;
+      done.push(st);
+    }
     for (const task of orderTasks(plan.tasks)) {
+      if (done.some((d) => d.task.id === task.id)) continue;
       await control.gate();
       const wt = workTypes.get(task.workType)!;
       const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map() };
@@ -534,8 +605,11 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           st.output = `${st.leadOutput}\n\n(no version passed the test-based competition)`;
         }
       }
-      bus.emit("task.finished", { taskId: task.id, status: st.best || wt.workspace === "document" ? "ok" : "partial", summary: st.output.slice(0, 2000) }, { taskId: task.id });
+      const taskStatus = st.best || wt.workspace === "document" ? "ok" : "partial";
+      bus.emit("task.finished", { taskId: task.id, status: taskStatus, summary: st.output.slice(0, 2000) }, { taskId: task.id });
       done.push(st);
+      checkpoint.done.push({ taskId: task.id, workType: wt.name, output: st.output, status: taskStatus, bestSnapshotDir: st.best?.snapshotDir, bestVersion: st.best?.version, bestTestRun: st.best?.testRun, outputPath: result.outputs[task.id] });
+      saveCheckpoint();
 
       // ---------------------------------------------------------- helpers
       /** Emits the member's diff against the current best; returns the number of changed files. */

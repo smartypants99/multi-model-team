@@ -35,6 +35,8 @@ export interface StartRunOptions {
   autoAnswer?: boolean;
   reselect?: boolean;
   runId?: string;
+  /** Log folder of an earlier run to continue from its checkpoint. */
+  resumeFrom?: string;
   /** Extra channel that may answer questions (e.g. the terminal). */
   terminal?: Interaction & { cancel?: (questionId: string) => void };
 }
@@ -77,7 +79,7 @@ export class Engine implements DashboardController {
       if (e.type === "run.resumed") live.status = "running";
     });
     this.writeControlFile(runId, { runId, outDir, pid: process.pid, startedAt: live.startedAt });
-    live.promise = runPipeline({ request: opts.request, config: this.loaded.config, env: this.loaded.env, mock: opts.mock || this.mock, interaction, outDir, overrides: opts.overrides, bus, runId, autoAnswer: opts.autoAnswer, reselect: opts.reselect }, control).then((r) => {
+    live.promise = runPipeline({ request: opts.request, config: this.loaded.config, env: this.loaded.env, mock: opts.mock || this.mock, interaction, outDir, overrides: opts.overrides, bus, runId, autoAnswer: opts.autoAnswer, reselect: opts.reselect, resumeFrom: opts.resumeFrom }, control).then((r) => {
       live.status = r.status;
       return r;
     });
