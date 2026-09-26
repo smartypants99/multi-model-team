@@ -179,7 +179,9 @@ export function killLeftoverProcesses(groupKey: string): number {
       if (process.platform === "win32") {
         spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).unref();
       } else {
-        process.kill(-pid, "SIGKILL");
+        // Group first (the shell's group, inherited by its background children), then the pid itself.
+        try { process.kill(-pid, "SIGKILL"); } catch { /* no such group */ }
+        process.kill(pid, "SIGKILL");
       }
       killed++;
     } catch {
@@ -279,6 +281,37 @@ export function runCommand(req: CommandRequest, opts: RunOptions): Promise<Comma
       if (!killedReason) killedReason = "spawn failed";
       finish(null, `\n${err.message}`);
     });
-    child.on("close", (code) => finish(code));
+    child.on("close", (code) => {
+      // Remember surviving descendants (background servers) so the run can stop them later.
+      // Their ParentProcessId/ppid keeps pointing at the exited shell on both Windows and POSIX.
+      if (opts.groupKey && child.pid) {
+        descendantPids(child.pid).then((pids) => {
+          if (!pids.length) return;
+          if (!groups.has(opts.groupKey!)) groups.set(opts.groupKey!, new Set());
+          for (const p of pids) groups.get(opts.groupKey!)!.add(p);
+        }, () => {});
+      }
+      finish(code);
+    });
   });
+}
+
+/** Pids of every live descendant of `rootPid` (excluding itself). */
+export async function descendantPids(rootPid: number): Promise<number[]> {
+  const rows = await listProcesses();
+  const byParent = new Map<number, number[]>();
+  for (const r of rows) byParent.set(r.ppid, [...(byParent.get(r.ppid) ?? []), r.pid]);
+  const out: number[] = [];
+  const stack = [rootPid];
+  const seen = new Set<number>([rootPid]);
+  while (stack.length) {
+    const p = stack.pop()!;
+    for (const c of byParent.get(p) ?? []) {
+      if (seen.has(c)) continue;
+      seen.add(c);
+      out.push(c);
+      stack.push(c);
+    }
+  }
+  return out;
 }
