@@ -174,7 +174,8 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       taskHint: opts.request,
       interaction: { ask: (q) => ask(q) },
       leadProviderId,
-      askFor: opts.reselect ? "all" : ns ? "missing" : "none",
+      // --yes means "no questions": any provider without a saved choice is picked automatically.
+      askFor: opts.reselect ? "all" : opts.autoAnswer ? "none" : ns ? "missing" : "none",
       seed: runId,
       autoPick: opts.mock ? undefined : async (provider, models, task) => leadAutoPick(provider.displayName, models, task),
     });

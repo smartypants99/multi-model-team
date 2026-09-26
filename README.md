@@ -69,7 +69,7 @@ See `DESIGN.md` for the reasoning behind each judgement.
 - Node.js 20 or newer (22 recommended) and npm
 - git
 - Claude Code, if you want the slash command (the CLI works without it)
-- API keys for the providers you want on the team; an Anthropic key is required for the lead
+- API keys for the providers you want on the team. The lead is Claude: either an Anthropic API key, or a logged-in Claude Code installation (the engine drives `claude -p` on your subscription when no key is set)
 - Optional: Playwright's Chromium for screenshot-based visual verification (`npm i -D playwright && npx playwright install chromium`)
 
 ## Installation
@@ -123,7 +123,9 @@ MOONSHOT_API_KEY=...
 SEARCH_API_KEY=...        # optional: web search for all models (provider set in config)
 ```
 
-`.env` is git-ignored. Keys are never written to logs, the UI or sandboxes. The engine does not guess a provider from the key's prefix; it probes the candidate endpoints and keeps the ones that answer. Check what was found with:
+`.env` is git-ignored. Keys are never written to logs, the UI or sandboxes.
+
+**No Anthropic API key?** If Claude Code is installed and logged in, the engine uses it as the lead automatically (`claude -p` with a local tool server, billed to your Claude subscription). Set `MMT_USE_CLAUDE_CLI=1` to prefer it even when a key exists. The engine does not guess a provider from the key's prefix; it probes the candidate endpoints and keeps the ones that answer. Check what was found with:
 
 ```bash
 node dist/cli/main.js providers
@@ -157,6 +159,10 @@ Reasoning controls differ by model (effort levels, a thinking budget, on/off, or
 node dist/cli/main.js run --request "build a CLI that converts CSV to Parquet with tests"
 node dist/cli/main.js serve          # dashboard only: replay runs, edit settings
 node dist/cli/main.js providers      # what keys/models were detected
+node dist/cli/main.js run --detach --request "..."   # background run; then:
+node dist/cli/main.js wait <runId>   # block until finished or a question is pending
+node dist/cli/main.js answer <runId> <questionId> "text"
+node dist/cli/main.js stop <runId>   # also pause / resume
 node dist/cli/main.js --help
 ```
 
@@ -202,7 +208,8 @@ Create `work-types/<name>/worktype.json` and the prompt files it references, or 
 ## Troubleshooting
 
 - **"No providers detected"**: check `.env` and run `node dist/cli/main.js providers`. Keys are probed against every candidate endpoint; a key that answers nowhere is listed with what was tried.
-- **Z.AI key rejected**: coding-plan keys only work on the coding endpoint; the engine tries both and keeps the one that answers.
+- **Z.AI key rejected**: coding-plan keys only work on the coding endpoint. The models list answers everywhere, so the engine probes each endpoint with a real one-token completion and keeps only the ones that accept the key.
+- **Claude Code lead says "Not logged in"**: run `claude` once interactively and log in; the engine calls `claude -p` without `--bare` so it can use the stored login.
 - **The slash command says the engine is not built**: run `npm install && npm run build` in the plugin folder.
 - **Screenshots say Playwright is unavailable**: install it in the environment the engine runs in; until then visual verification falls back to execution verification.
 - **Windows**: use PowerShell or cmd; paths with spaces are fine. If `node` is not found by the hook, make sure it is on the PATH used by Claude Code.
