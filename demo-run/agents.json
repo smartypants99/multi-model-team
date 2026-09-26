@@ -1,0 +1,50 @@
+{
+  "Agent C": {
+    "memberId": "m1",
+    "providerId": "mock",
+    "endpointId": "mock",
+    "modelId": "mock-lead",
+    "reasoning": "high",
+    "isLead": true
+  },
+  "Agent F": {
+    "memberId": "m2",
+    "providerId": "mock",
+    "endpointId": "mock",
+    "modelId": "mock-critic",
+    "reasoning": "high",
+    "isLead": false
+  },
+  "Agent B": {
+    "memberId": "m3",
+    "providerId": "mock",
+    "endpointId": "mock",
+    "modelId": "mock-agreeable",
+    "reasoning": "high",
+    "isLead": false
+  },
+  "Agent D": {
+    "memberId": "m4",
+    "providerId": "mock",
+    "endpointId": "mock",
+    "modelId": "mock-vision",
+    "reasoning": "high",
+    "isLead": false
+  },
+  "Agent E": {
+    "memberId": "m5",
+    "providerId": "mock",
+    "endpointId": "mock",
+    "modelId": "mock-flaky",
+    "reasoning": "none",
+    "isLead": false
+  },
+  "Agent A": {
+    "memberId": "m6",
+    "providerId": "mock",
+    "endpointId": "mock",
+    "modelId": "mock-broken",
+    "reasoning": "none",
+    "isLead": false
+  }
+}

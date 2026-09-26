@@ -1,0 +1,12 @@
+# diff by Agent B (m3) against best version 1 at 2026-09-26T02:15:23.315Z
+# files: src/game.js
+diff --git a<workspace>/history/v1/src/game.js b<workspace>/sandboxes/m3/src/game.js
+index 833c242..04e416f 100644
+--- a<workspace>/history/v1/src/game.js
++++ b<workspace>/sandboxes/m3/src/game.js
+@@ -1,4 +1,4 @@
+-// Pen Bosses - tiny game core (written by mock-lead in its sandbox)
++// Pen Bosses - tiny game core (written by mock-agreeable in its sandbox)
+ export const RANKING = ["Uni-ball", "Parker", "Lamy", "Pilot", "Montblanc"];
+ export function bosses(ranking = RANKING) {
+   return ranking.map((name, i) => ({ name, hp: 10 * (i + 1), damage: i + 1 }));

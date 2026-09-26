@@ -1,0 +1,32 @@
+{
+  "tasks": [
+    {
+      "id": "t1",
+      "title": "Research top pen brands",
+      "description": "Find and rank the top pen brands with sources.",
+      "workType": "researcher",
+      "acceptanceCriteria": [
+        "At least 5 brands",
+        "Each brand has a cited source"
+      ],
+      "dependsOn": []
+    },
+    {
+      "id": "t2",
+      "title": "Build the pen boss game",
+      "description": "Build a small browser game where better pens are harder bosses, using the research ranking.",
+      "workType": "coder",
+      "acceptanceCriteria": [
+        "Game runs",
+        "Bosses ordered by ranking",
+        "Tests pass"
+      ],
+      "dependsOn": [
+        "t1"
+      ]
+    }
+  ],
+  "notes": [
+    "Two work types: researcher then coder."
+  ]
+}

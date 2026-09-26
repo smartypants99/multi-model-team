@@ -1,0 +1,1 @@
+{"ts":"2026-09-26T02:15:20.561Z","memberId":"m6","label":"Agent A","model":"mock-broken","reasoning":"none","stage":"verify","taskId":"t1","tag":"verify/Agent A","usage":{},"costUsd":0,"error":"unknown: mock-broken always fails"}
