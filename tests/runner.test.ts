@@ -61,7 +61,9 @@ describe("runCommand", () => {
 });
 
 describe("leftover background processes", () => {
-  it("are killed when the run's group is cleaned up", async () => {
+  // POSIX only: the cleanup kills the shell's process group. On Windows it is best effort
+  // (taskkill per remembered pid) and cmd's `start /b` does not detach the way `&` does.
+  it.skipIf(process.platform === "win32")("are killed when the run's group is cleaned up", async () => {
     const { runCommand: run, killLeftoverProcesses } = await import("../src/sandbox/runner.js");
     const fs = await import("node:fs");
     const os = await import("node:os");
