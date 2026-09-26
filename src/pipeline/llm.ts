@@ -218,7 +218,7 @@ export class Llm {
       const truncated = result.stopReason === "max_tokens";
       const retryMessages: ChatMessage[] = [
         ...result.messages,
-        { role: "assistant", content: [{ type: "text", text: result.text || "(empty)" }] },
+        { role: "assistant", content: [{ type: "text", text: result.text || "(empty)" }], reasoningText: result.reasoningText },
         { role: "user", content: [{ type: "text", text: truncated ? "Your reply was cut off by the output limit. Reply again with ONLY the JSON object, more concisely." : `Your reply was not valid: ${problem}. Reply again with ONLY the JSON object described in your instructions, no prose, no code fences.` }] },
       ];
       const second = await this.call({ ...opts, finalOnly: true, messages: retryMessages, maxTokens: truncated ? Math.min((opts.maxTokens ?? this.deps.maxTokens) * 2, 64_000) : opts.maxTokens, tag: opts.tag + "/json-retry" });

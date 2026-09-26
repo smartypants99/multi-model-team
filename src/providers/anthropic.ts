@@ -25,7 +25,8 @@ export interface AnthropicOptions {
 
 const API_VERSION = "2023-06-01";
 /** Models that cannot turn thinking off (docs: Claude 5 family / Opus 5.5 reject `disabled`). */
-const CANNOT_DISABLE = /fable|opus-5|mythos/i;
+/** Models on which thinking cannot be disabled (docs: Fable 5.x, Mythos, Opus 5.5). Plain claude-opus-5 accepts "disabled". */
+const CANNOT_DISABLE = /fable|mythos|opus-5-5/i;
 const EFFORT_LEVELS: Exclude<ReasoningLevel, "none">[] = ["low", "medium", "high", "xhigh", "max"];
 
 export class AnthropicAdapter implements ProviderAdapter {
@@ -87,7 +88,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     if (known) return known.reasoning;
     const hinted = applyHints({ providerId: this.endpoint.providerId, modelId, displayName: modelId, capabilities: defaultCapabilities() }, this.opts.capabilityHints);
     if (hinted.capabilities.source.reasoning === "config") return hinted.capabilities.reasoning;
-    if (/haiku-4-5|claude-3|sonnet-4-5|opus-4-1|sonnet-4-\d?$|opus-4$/i.test(modelId)) {
+    if (/haiku-4-5|claude-3|sonnet-4-5|opus-4-5|opus-4-1|sonnet-4$|opus-4$/i.test(modelId)) {
       return { kind: "budget", minTokens: 1024, maxTokens: 32000, native: "thinking.budget_tokens" };
     }
     const levels: ReasoningLevel[] = CANNOT_DISABLE.test(modelId) ? [...EFFORT_LEVELS] : ["none", ...EFFORT_LEVELS];
@@ -194,7 +195,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         if (p.type === "text") {
           if (p.text) blocks.push({ type: "text", text: p.text });
         } else if (p.type === "image") blocks.push({ type: "image", source: { type: "base64", media_type: p.mediaType, data: p.dataBase64 } });
-        else if (p.type === "tool_result") blocks.push({ type: "tool_result", tool_use_id: p.toolCallId, content: p.content, ...(p.isError ? { is_error: true } : {}) });
+        else if (p.type === "tool_result") blocks.push({ type: "tool_result", tool_use_id: p.toolCallId, content: p.content || "(no output)", ...(p.isError ? { is_error: true } : {}) });
       }
       if (blocks.length) push("user", blocks);
     }
@@ -231,14 +232,18 @@ export function capsFromMetadata(m: any): ModelCapabilities {
   else source.vision = "default";
 
   const effortSupported = supported(c.effort);
+  const adaptiveSupported = supported(c.thinking?.types?.adaptive);
   const enabledSupported = supported(c.thinking?.types?.enabled);
   let reasoning: ReasoningControl;
-  if (effortSupported) {
+  // Effort levels ride on adaptive thinking; a model that supports effort but rejects "adaptive"
+  // (Opus 4.5, "extended only") must use the budget path or the request is a 400.
+  if (effortSupported && adaptiveSupported) {
     const levels: ReasoningLevel[] = EFFORT_LEVELS.filter((l) => supported(c.effort?.[l]));
-    if (enabledSupported && !CANNOT_DISABLE.test(id)) levels.unshift("none");
+    // "disabled" is accepted on every adaptive model except the ones documented as always-on.
+    if (!CANNOT_DISABLE.test(id)) levels.unshift("none");
     reasoning = { kind: "levels", levels, native: "output_config.effort" };
     source.reasoning = "metadata";
-  } else if (enabledSupported) {
+  } else if (enabledSupported || effortSupported) {
     reasoning = { kind: "budget", minTokens: 1024, maxTokens: 32000, native: "thinking.budget_tokens" };
     source.reasoning = "metadata";
   } else {

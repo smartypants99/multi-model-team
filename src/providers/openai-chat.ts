@@ -61,7 +61,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
         await httpJson(this.url("/chat/completions"), {
           method: "POST",
           headers: this.headers(),
-          body: { model, messages: [{ role: "user", content: "hi" }], max_tokens: 1, thinking: { type: "disabled" } },
+          body: { model, messages: [{ role: "user", content: "hi" }], max_tokens: 1 },
           timeoutMs: this.opts.timeoutMs,
         });
         return true;
@@ -119,6 +119,16 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     return applyHints({ providerId: this.endpoint.providerId, modelId, displayName: modelId, capabilities: defaultCaps(modelId, this.opts.flavor) }, this.opts.capabilityHints).capabilities.reasoning;
   }
 
+  /** POST helper: a Z.AI "no balance / no resource package" 429 is a permanent condition, not a rate limit to retry. */
+  private async post(url: string, init: Parameters<typeof httpJson>[1]) {
+    try {
+      return await httpJson<any>(url, init);
+    } catch (e) {
+      if (e instanceof ProviderError && isEntitlementError(e)) throw new ProviderError(e.message, "auth", undefined, e.status);
+      throw e;
+    }
+  }
+
   async chat(req: ChatRequest): Promise<ChatResponse> {
     const control = this.controlFor(req.model);
     const native = resolveNative(control, req.reasoning, this.opts.flavor);
@@ -134,7 +144,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     }
 
     const started = Date.now();
-    const { json } = await httpJson<any>(this.url("/chat/completions"), { method: "POST", headers: this.headers(), body, timeoutMs: req.timeoutMs || this.opts.timeoutMs, signal: req.signal });
+    const { json } = await this.post(this.url("/chat/completions"), { method: "POST", headers: this.headers(), body, timeoutMs: req.timeoutMs || this.opts.timeoutMs, signal: req.signal });
     const latencyMs = Date.now() - started;
 
     const choice = json?.choices?.[0] ?? {};

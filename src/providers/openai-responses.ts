@@ -2,6 +2,7 @@
  * OpenAI Responses API adapter, also used for xAI (a compatible clone).
  * Wire format per docs/providers.md.
  */
+import { ProviderError } from "../core/types.js";
 import type {
   ChatMessage,
   ChatRequest,
@@ -31,15 +32,18 @@ export interface OpenAIResponsesOptions {
 const OPENAI_EFFORT_DEFAULTS: { match: RegExp; levels: ReasoningLevel[] }[] = [
   { match: /^gpt-6-astra/, levels: ["low", "medium", "high", "xhigh", "max"] },
   { match: /^gpt-6-(sol|luna)|^gpt-5\.6/, levels: ["none", "low", "medium", "high", "xhigh", "max"] },
-  { match: /^gpt-5\.[45]/, levels: ["none", "low", "medium", "high", "xhigh"] },
-  { match: /^gpt-5/, levels: ["none", "low", "medium", "high"] },
+  { match: /^gpt-5\.[2-5]/, levels: ["none", "low", "medium", "high", "xhigh"] },
+  { match: /^gpt-5\.1/, levels: ["none", "low", "medium", "high"] },
+  // Bare gpt-5 / gpt-5-mini / gpt-5-nano: minimal|low|medium|high, no "none" (model pages).
+  { match: /^gpt-5(-mini|-nano|-chat|-codex)?(-|$)/, levels: ["low", "medium", "high"] },
   { match: /^o\d/, levels: ["low", "medium", "high"] },
 ];
 
 export class OpenAIResponsesAdapter implements ProviderAdapter {
   private readonly caps = new Map<string, ModelCapabilities>();
   /** function_call call_id → reasoning items (with encrypted_content) from the same output, re-sent before the call. */
-  private readonly reasoningItems = new Map<string, unknown[]>();
+  /** Full `output` arrays of tool-calling responses, keyed by call_id, replayed verbatim on the next turn (docs: items must be passed untouched, in order). */
+  private readonly rawOutputs = new Map<string, unknown[]>();
 
   constructor(
     readonly endpoint: ProviderEndpoint,
@@ -155,6 +159,7 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
     const { json } = await httpJson<any>(this.url("/responses"), { method: "POST", headers: this.headers(), body, timeoutMs: req.timeoutMs || this.opts.timeoutMs, signal: req.signal });
     const latencyMs = Date.now() - started;
 
+    if (json?.status === "failed") throw new ProviderError(`response failed: ${json?.error?.message ?? json?.error?.code ?? "unknown error"}`, "unknown");
     const output: any[] = Array.isArray(json?.output) ? json.output : [];
     const texts: string[] = [];
     const summaries: string[] = [];
@@ -162,7 +167,10 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
     const reasoning: unknown[] = [];
     for (const item of output) {
       if (item?.type === "message" && Array.isArray(item.content)) {
-        for (const c of item.content) if (c?.type === "output_text" && typeof c.text === "string") texts.push(c.text);
+        for (const c of item.content) {
+          if (c?.type === "output_text" && typeof c.text === "string") texts.push(c.text);
+          else if (c?.type === "refusal") texts.push(`[refusal] ${typeof c.refusal === "string" ? c.refusal : ""}`.trim());
+        }
       } else if (item?.type === "function_call") {
         toolCalls.push({ id: String(item.call_id ?? item.id), name: String(item.name), arguments: parseArgs(item.arguments) });
       } else if (item?.type === "reasoning") {
@@ -170,7 +178,7 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
         if (Array.isArray(item.summary)) for (const s of item.summary) if (typeof s?.text === "string" && s.text) summaries.push(s.text);
       }
     }
-    if (reasoning.length) for (const tc of toolCalls) this.reasoningItems.set(tc.id, reasoning);
+    if (toolCalls.length) for (const tc of toolCalls) this.rawOutputs.set(tc.id, output);
 
     let stopReason: ChatResponse["stopReason"] = toolCalls.length ? "tool_use" : "end";
     if (json?.status === "incomplete") stopReason = json?.incomplete_details?.reason === "max_output_tokens" ? "max_tokens" : "other";
@@ -203,10 +211,14 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
         if (content.length) input.push({ role: "user", content });
       } else if (m.role === "assistant") {
         const calls = m.content.filter((p): p is Extract<ContentPart, { type: "tool_call" }> => p.type === "tool_call");
-        const stashed = calls.map((c) => this.reasoningItems.get(c.id)).find(Boolean);
+        const stashed = calls.map((c) => this.rawOutputs.get(c.id)).find(Boolean);
+        if (stashed) {
+          // Echo the provider's own output items untouched (reasoning, message, function_call, in their original order).
+          input.push(...stashed);
+          continue;
+        }
         const text = m.content.filter((p): p is Extract<ContentPart, { type: "text" }> => p.type === "text").map((p) => p.text).join("");
         if (text) input.push({ role: "assistant", content: [{ type: "output_text", text }] });
-        if (stashed) input.push(...stashed);
         for (const c of calls) input.push({ type: "function_call", call_id: c.id, name: c.name, arguments: JSON.stringify(c.arguments ?? {}) });
       } else {
         for (const p of m.content) if (p.type === "tool_result") input.push({ type: "function_call_output", call_id: p.toolCallId, output: p.content });
@@ -246,7 +258,7 @@ export function openaiDefaultCaps(id: string): ModelCapabilities {
   const effort = OPENAI_EFFORT_DEFAULTS.find((e) => e.match.test(id));
   return defaultCapabilities({
     tools: true,
-    vision: /^gpt-/.test(id),
+    vision: /^(gpt-|o\d)/.test(id),
     returnsReasoningText: !!effort,
     reasoning: effort ? { kind: "levels", levels: effort.levels, native: "reasoning.effort" } : { kind: "none" },
   });

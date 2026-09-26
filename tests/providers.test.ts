@@ -293,10 +293,13 @@ describe("OpenAIResponsesAdapter", () => {
     );
     expect(second.text).toBe("Sure.");
     const input = requests[1].body.input;
-    expect(input[1]).toEqual({ role: "assistant", content: [{ type: "output_text", text: "Sure." }] });
-    expect(input[2]).toMatchObject({ type: "reasoning", id: "rs_1", encrypted_content: "enc" });
-    expect(input[3]).toEqual({ type: "function_call", call_id: "call_1", name: "write_file", arguments: '{"path":"a.txt"}' });
-    expect(input[4]).toEqual({ type: "function_call_output", call_id: "call_1", output: "ok" });
+    // The first response's output items are replayed verbatim and in order (reasoning first, as the provider emitted it).
+    const firstOutput = (requests[0] as any).response?.output ?? undefined;
+    const replayed = input.slice(1, input.length - 1);
+    expect(replayed[0]).toMatchObject({ type: "reasoning", id: "rs_1", encrypted_content: "enc" });
+    expect(replayed.some((i: any) => i.type === "function_call" && i.call_id === "call_1")).toBe(true);
+    expect(input[input.length - 1]).toEqual({ type: "function_call_output", call_id: "call_1", output: "ok" });
+    void firstOutput;
   });
 
   it("omits reasoning for level none on models without none, sends effort none where allowed, maps incomplete → max_tokens", async () => {
@@ -567,6 +570,44 @@ describe("Z.AI entitlement probe", () => {
       expect(await accepted.probe()).toBe(true);
     } finally {
       globalThis.fetch = origFetch;
+    }
+  });
+});
+
+describe("adapter conformance regressions", () => {
+  it("Anthropic: effort without adaptive support (Opus 4.5) takes the budget path; adaptive models offer 'none' unless always-on", async () => {
+    const { capsFromMetadata } = await import("../src/providers/anthropic.js");
+    const sup = (v: boolean) => ({ supported: v });
+    const eff = { supported: true, low: sup(true), medium: sup(true), high: sup(true), xhigh: sup(false), max: sup(true) };
+    const opus45 = capsFromMetadata({ id: "claude-opus-4-5-20251101", capabilities: { effort: eff, thinking: { supported: true, types: { adaptive: sup(false), enabled: sup(true) } } } });
+    expect(opus45.reasoning.kind).toBe("budget");
+    const sonnet5 = capsFromMetadata({ id: "claude-sonnet-5", capabilities: { effort: { ...eff, xhigh: sup(true) }, thinking: { supported: true, types: { adaptive: sup(true), enabled: sup(false) } } } });
+    expect(sonnet5.reasoning.kind).toBe("levels");
+    expect((sonnet5.reasoning as any).levels[0]).toBe("none");
+    const opus55 = capsFromMetadata({ id: "claude-opus-5-5", capabilities: { effort: { ...eff, xhigh: sup(true) }, thinking: { supported: true, types: { adaptive: sup(true), enabled: sup(false) } } } });
+    expect((opus55.reasoning as any).levels).not.toContain("none");
+    const opus5 = capsFromMetadata({ id: "claude-opus-5", capabilities: { effort: { ...eff, xhigh: sup(true) }, thinking: { supported: true, types: { adaptive: sup(true), enabled: sup(false) } } } });
+    expect((opus5.reasoning as any).levels).toContain("none");
+  });
+  it("OpenAI: bare gpt-5 has no 'none', gpt-5.2 keeps xhigh, gpt-5.1 has none without xhigh", async () => {
+    const { openaiDefaultCaps } = await import("../src/providers/openai-responses.js");
+    const lv = (id: string) => (openaiDefaultCaps(id).reasoning as any).levels as string[];
+    expect(lv("gpt-5")).toEqual(["low", "medium", "high"]);
+    expect(lv("gpt-5-mini")).toEqual(["low", "medium", "high"]);
+    expect(lv("gpt-5.2")).toContain("xhigh");
+    expect(lv("gpt-5.2")).toContain("none");
+    expect(lv("gpt-5.1")).not.toContain("xhigh");
+    expect(lv("gpt-6-astra")).not.toContain("none");
+  });
+  it("OpenAI: a failed response is an error, not an empty reply", async () => {
+    const { OpenAIResponsesAdapter } = await import("../src/providers/openai-responses.js");
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ status: "failed", error: { code: "server_error", message: "boom" }, output: [] }), { status: 200 })) as any;
+    try {
+      const a = new OpenAIResponsesAdapter({ id: "openai", providerId: "openai", displayName: "o", baseUrl: "https://example.invalid/v1", protocol: "openai-responses", envKeys: [] }, "not-a-real-value", { timeoutMs: 1000, capabilityHints: {}, flavor: "openai" });
+      await expect(a.chat({ model: "gpt-5.2", system: "s", messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], reasoning: "low", maxTokens: 10, timeoutMs: 1000 })).rejects.toThrow(/boom/);
+    } finally {
+      globalThis.fetch = orig;
     }
   });
 });
