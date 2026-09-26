@@ -111,14 +111,19 @@ interface ProcRow {
 
 async function listProcesses(): Promise<ProcRow[]> {
   if (process.platform === "win32") {
+    // Plain text output is much faster than ConvertTo-Json on busy hosts.
     const out = await execText(
       "powershell",
-      ["-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize | ConvertTo-Json -Compress"],
-      10_000,
+      ["-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $($_.WorkingSetSize)\" }"],
+      20_000,
     );
-    const parsed = JSON.parse(out.trim() || "[]");
-    const rows: any[] = Array.isArray(parsed) ? parsed : [parsed];
-    return rows.map((r) => ({ pid: Number(r.ProcessId), ppid: Number(r.ParentProcessId), rssKb: Number(r.WorkingSetSize) / 1024 }));
+    const rows: ProcRow[] = [];
+    for (const line of out.split(/\r?\n/)) {
+      const m = line.trim().split(/\s+/);
+      if (m.length < 3) continue;
+      rows.push({ pid: Number(m[0]), ppid: Number(m[1]), rssKb: Number(m[2]) / 1024 });
+    }
+    return rows;
   }
   const out = await execText("ps", ["-A", "-o", "pid=,ppid=,rss="], 5_000);
   const rows: ProcRow[] = [];

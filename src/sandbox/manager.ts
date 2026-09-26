@@ -379,23 +379,41 @@ function execGit(args: string[]): Promise<{ code: number; stdout: string } | und
 async function gitDiff(a: string, b: string): Promise<{ files: string[]; diff: string } | undefined> {
   const res = await execGit(["diff", "--no-index", "--no-color", "--", a, b]);
   if (!res || (res.code !== 0 && res.code !== 1)) return undefined;
-  // Drop file sections that belong to skipped directories, collect file names.
+  // The file list is computed by walking both trees (platform-independent);
+  // git's output is only used as the diff text, minus skipped directories.
+  const files = changedFiles(a, b);
   const sections = res.stdout.split(/^(?=diff --git )/m);
-  const files: string[] = [];
   const kept: string[] = [];
   for (const sec of sections) {
     if (!sec.trim()) continue;
-    const head = sec.split("\n", 1)[0];
-    const rel = fileFromGitHeader(head, a, b);
-    if (rel === undefined) {
-      kept.push(sec);
-      continue;
-    }
-    if (rel.split("/").some((s) => ALWAYS_SKIP.has(s))) continue;
-    files.push(rel);
+    const head = toPosix(sec.split("\n", 1)[0]);
+    if ([...ALWAYS_SKIP].some((d) => head.includes(`/${d}/`))) continue;
     kept.push(sec);
   }
   return { files, diff: kept.join("") };
+}
+
+/** Relative paths (posix) of files that differ between two trees, skipping ALWAYS_SKIP dirs. */
+export function changedFiles(a: string, b: string): string[] {
+  const list = (root: string) => {
+    const out = new Map<string, string>();
+    if (!fs.existsSync(root)) return out;
+    walk(root, ALWAYS_SKIP, (abs, entry) => {
+      if (!entry.isDirectory()) out.set(toPosix(path.relative(root, abs)), abs);
+      return true;
+    });
+    return out;
+  };
+  const fa = list(a);
+  const fb = list(b);
+  const files = new Set<string>();
+  for (const [rel, abs] of fa) {
+    const other = fb.get(rel);
+    if (!other) files.add(rel);
+    else if (!fs.readFileSync(abs).equals(fs.readFileSync(other))) files.add(rel);
+  }
+  for (const rel of fb.keys()) if (!fa.has(rel)) files.add(rel);
+  return [...files].sort();
 }
 
 /** From `diff --git a/<absA>/x b/<absB>/x` recover `x`. */

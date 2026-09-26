@@ -32,12 +32,13 @@ describe("runCommand", () => {
   }, 15_000);
 
   it("kills on memory limit", async () => {
-    const script = "const a=[];for(let i=0;i<200;i++){a.push(Buffer.alloc(8*1024*1024,1));}setTimeout(()=>{},8000)";
-    const r = await runCommand({ command: `node -e "${script}"`, cwd }, { rssLimitMb: 50, timeoutMs: 15_000, pollIntervalMs: 200 });
+    // The child holds ~1.6 GB for 25 s; Windows process listing is slow (seconds), so give the poller time.
+    const script = "const a=[];for(let i=0;i<200;i++){a.push(Buffer.alloc(8*1024*1024,1));}setTimeout(()=>{},25000)";
+    const r = await runCommand({ command: `node -e "${script}"`, cwd }, { rssLimitMb: 50, timeoutMs: 40_000, pollIntervalMs: 200 });
     expect(r.killedReason).toBe("memory limit");
     expect(r.timedOut).toBe(false);
     expect(r.peakRssMb ?? 0).toBeGreaterThan(50);
-  }, 20_000);
+  }, 60_000);
 
   it("strips secret-looking env vars unless passed explicitly", async () => {
     process.env.MMT_TEST_API_KEY = "shh";
