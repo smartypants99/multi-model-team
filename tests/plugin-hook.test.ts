@@ -77,8 +77,13 @@ describe.each(modes)("plugin/hooks/guard.js (%s)", (_label, env) => {
     expect(r.json?.hookSpecificOutput?.permissionDecision).toBe("ask");
   });
 
-  it("stays silent for a destructive command whose absolute targets are all in one sandbox", () => {
+  it("asks before Claude Code deletes inside a model's sandbox from outside it (sandboxes belong to the models)", () => {
     const r = runGuard(bash(`rm -rf "${path.join(sandboxM1, "build")}"`, os.tmpdir()), env);
+    expect(r.status).toBe(0);
+    expect(r.json?.hookSpecificOutput?.permissionDecision).toBe("ask");
+  });
+  it("stays silent for a destructive command inside a sandbox Claude Code owns", () => {
+    const r = runGuard(bash(`rm -rf "${path.join(sandboxM1, "build")}"`, os.tmpdir()), { ...env, MMT_CLAUDE_MEMBER_IDS: "m1" });
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("");
   });
@@ -92,6 +97,20 @@ describe.each(modes)("plugin/hooks/guard.js (%s)", (_label, env) => {
     const r = runGuard(bash("npm test", os.tmpdir()), env);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("");
+  });
+
+  it("denies NotebookEdit inside an engine sandbox", () => {
+    const r = runGuard({ hook_event_name: "PreToolUse", tool_name: "NotebookEdit", tool_input: { notebook_path: path.join(sandboxM2, "nb.ipynb") }, session_id: "s", cwd: os.tmpdir() }, env);
+    expect(r.json?.hookSpecificOutput?.permissionDecision).toBe("deny");
+  });
+
+  it("asks for Bash commands that write into an engine sandbox via cp or a redirect", () => {
+    const cp = runGuard(bash(`cp notes.txt "${path.join(sandboxM2, "notes.txt")}"`, os.tmpdir()), env);
+    expect(cp.json?.hookSpecificOutput?.permissionDecision).toBe("ask");
+    const redirect = runGuard(bash(`echo hi > ${path.join(sandboxM2, "hi.txt")}`, os.tmpdir()), env);
+    expect(redirect.json?.hookSpecificOutput?.permissionDecision).toBe("ask");
+    const read = runGuard(bash(`cat ${path.join(sandboxM2, "index.js")}`, os.tmpdir()), env);
+    expect(read.json).toBeUndefined();
   });
 
   it("denies Write inside an engine sandbox", () => {
