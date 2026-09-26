@@ -188,6 +188,7 @@ Every run writes a folder with `events.jsonl` (machine-readable, the source of t
 
 - **Sandboxes**: one directory per model, outside the repository. A model may do anything inside its own sandbox, including deleting files, and can only read the others'.
 - **Destructive-command confirmation**: anything destructive that could touch files outside a sandbox (absolute paths, `..`, `sudo`, global uninstalls, system settings) pauses the run and asks you. The Claude Code hook applies the same rule to Claude Code's own commands.
+- **Unattended runs**: when nobody can answer (stdin is not a terminal and no dashboard is open, or `MMT_UNATTENDED=1` for detached runs) the engine takes the safe answer: destructive commands are denied, the cost cap stops the run, model selection goes to auto, and clarifications get "use your best judgement". Nothing is ever auto-approved.
 - **Resource guard**: the engine measures your real RAM, free disk, cores and GPU/unified memory. Heavy commands must carry a resource estimate; every model votes on it; the engine blocks anything above a safe fraction (60 % by default) and kills processes that exceed their memory limit. Every command has a timeout, and sandboxed commands never see your API keys.
 
 ## Cost warning
