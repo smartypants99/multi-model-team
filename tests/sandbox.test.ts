@@ -146,3 +146,21 @@ describe("helpers", () => {
     expect(d).toEqual([" a", "-b", "+x", " c"]);
   });
 });
+
+describe("SandboxManager reseed", () => {
+  it("replaces a sandbox's contents with a copy of another directory", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mmt-reseed-"));
+    const m = new SandboxManager(root, "run");
+    m.init();
+    m.createSandbox("lead");
+    m.writeFile("lead", "src/app.js", "lead code");
+    m.createSandbox("other");
+    m.writeFile("other", "stale.txt", "old");
+    m.reseed("other", m.sandboxDir("lead"));
+    expect(m.readFile("other", "src/app.js")).toBe("lead code");
+    expect(fs.existsSync(path.join(m.sandboxDir("other"), "stale.txt"))).toBe(false);
+    // The lead's sandbox is untouched and the copies are independent.
+    m.writeFile("other", "src/app.js", "changed");
+    expect(m.readFile("lead", "src/app.js")).toBe("lead code");
+  });
+});

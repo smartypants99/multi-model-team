@@ -2,7 +2,7 @@
   {
     "version": 1,
     "fromMemberId": "m1",
-    "crownedAt": "2026-09-26T02:27:21.571Z",
+    "crownedAt": "2026-09-26T04:01:01.551Z",
     "taskId": "t1",
     "testRun": {
       "suiteHash": "rubric",
@@ -28,7 +28,7 @@
           "passed": true
         }
       ],
-      "passed": 0,
+      "passed": 5,
       "failed": 0,
       "rawOutput": "[info] Tests pass; title screen renders boss list.\n[info] Tests pass; title screen renders boss list.",
       "command": "rubric"
@@ -39,7 +39,7 @@
   {
     "version": 1,
     "fromMemberId": "m1",
-    "crownedAt": "2026-09-26T02:27:22.508Z",
+    "crownedAt": "2026-09-26T04:01:01.833Z",
     "taskId": "t2",
     "testRun": {
       "suiteHash": "d24d6d7e6ffb586b04839bed434246ea85685d2462ff0465ca94434b7b8d445b",
@@ -63,10 +63,10 @@
       ],
       "passed": 4,
       "failed": 0,
-      "rawOutput": "TAP version 13\n# Subtest: bosses get harder in ranking order\nok 1 - bosses get harder in ranking order\n  ---\n  duration_ms: 0.652833\n  type: 'test'\n  ...\n# Subtest: last boss is the best pen\nok 2 - last boss is the best pen\n  ---\n  duration_ms: 0.124375\n  type: 'test'\n  ...\n# Subtest: empty ranking yields no boss\nok 3 - empty ranking yields no boss\n  ---\n  duration_ms: 0.087958\n  type: 'test'\n  ...\n# Subtest: brand names are escaped\nok 4 - brand names are escaped\n  ---\n  duration_ms: 0.146333\n  type: 'test'\n  ...\n1..4\n# tests 4\n# suites 0\n# pass 4\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 87.64575\n\n",
+      "rawOutput": "TAP version 13\n# Subtest: bosses get harder in ranking order\nok 1 - bosses get harder in ranking order\n  ---\n  duration_ms: 0.306875\n  type: 'test'\n  ...\n# Subtest: last boss is the best pen\nok 2 - last boss is the best pen\n  ---\n  duration_ms: 0.058875\n  type: 'test'\n  ...\n# Subtest: empty ranking yields no boss\nok 3 - empty ranking yields no boss\n  ---\n  duration_ms: 0.040042\n  type: 'test'\n  ...\n# Subtest: brand names are escaped\nok 4 - brand names are escaped\n  ---\n  duration_ms: 0.068583\n  type: 'test'\n  ...\n1..4\n# tests 4\n# suites 0\n# pass 4\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 42.422417\n\n",
       "command": "node --test --test-reporter=tap tests/game.test.js"
     },
     "snapshotDir": "<workspace>/history/v1",
-    "reason": "after discussion: first measured version"
+    "reason": "lead's version and the verifiers' copies: first measured version"
   }
 ]
