@@ -126,6 +126,9 @@ export class McpToolServer {
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    // Loopback hosts only: a DNS-rebinding page would carry a foreign Host header.
+    const host = String(req.headers.host ?? "").toLowerCase().replace(/:\d+$/, "");
+    if (host !== "127.0.0.1" && host !== "localhost" && host !== "[::1]") return sendJson(res, 403, { error: "forbidden host" });
     const m = url.pathname.match(/^\/mcp\/([A-Za-z0-9._-]+)\/?$/);
     if (!m) return sendJson(res, 404, { error: "not found" });
     const session = this.sessions.get(m[1]);

@@ -181,7 +181,7 @@ This writes the run into `runs/demo/` (git-ignored). A committed copy of the sam
 
 ![Dashboard screenshot](docs/dashboard.png)
 
-`node dist/cli/main.js serve` starts it on `http://127.0.0.1:4310` (local only). It shows the live chat between agents, the stage and task timeline, each agent's rationale and any provider-returned reasoning, verification results, red-team critiques, verifier screenshots, sandbox diffs, best-version history with test scores, live token and cost totals, pause/stop controls, and the settings page.
+`node dist/cli/main.js serve` starts it on `http://127.0.0.1:4310` (local only). The URL it prints carries a per-session access token (`?t=...`); open that exact URL, since the API refuses requests without it. This keeps other web pages, DNS rebinding and sandboxed model commands from driving your runs. It shows the live chat between agents, the stage and task timeline, each agent's rationale and any provider-returned reasoning, verification results, red-team critiques, verifier screenshots, sandbox diffs, best-version history with test scores, live token and cost totals, pause/stop controls, and the settings page.
 
 ## Reading the logs
 

@@ -72,13 +72,32 @@
     toastTimer = setTimeout(() => (t.hidden = true), 3500);
   };
 
+  // Access token: the CLI prints a URL like http://127.0.0.1:4310/?t=<token>#/run/<id>.
+  // It is kept in sessionStorage and sent with every API call; the URL is cleaned so it is not leaked via history/referrers.
+  const TOKEN_KEY = "mmt-token";
+  (() => {
+    try {
+      const qs = new URLSearchParams(location.search);
+      const t = qs.get("t");
+      if (t) {
+        sessionStorage.setItem(TOKEN_KEY, t);
+        qs.delete("t");
+        const clean = location.pathname + (qs.toString() ? "?" + qs.toString() : "") + location.hash;
+        history.replaceState(null, "", clean);
+      }
+    } catch { /* storage unavailable: token stays in memory only */ }
+  })();
+  const token = () => { try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } };
+  const withToken = (url) => (token() ? url + (url.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token()) : url);
+
   const api = async (path, opts = {}) => {
     const res = await fetch(path, {
       ...opts,
-      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+      headers: { "Content-Type": "application/json", ...(token() ? { Authorization: "Bearer " + token() } : {}), ...(opts.headers || {}) },
       body: opts.body != null ? JSON.stringify(opts.body) : undefined,
     });
     const body = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Not authorised: open the dashboard from the URL printed by the CLI (it carries the access token).");
     if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`);
     return body;
   };
@@ -584,7 +603,7 @@
         ),
       );
   }
-  const fileUrl = (runId, p) => `/api/runs/${encodeURIComponent(runId)}/file?path=${encodeURIComponent(p)}`;
+  const fileUrl = (runId, p) => withToken(`/api/runs/${encodeURIComponent(runId)}/file?path=${encodeURIComponent(p)}`);
 
   function renderDiff(diffText) {
     const box = el("div", { class: "diff" });
@@ -900,7 +919,7 @@
       ui.live = true;
       const events = [];
       let ready = false;
-      es = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
+      es = new EventSource(withToken(`/api/runs/${encodeURIComponent(runId)}/stream`));
       es.addEventListener("run", (ev) => {
         const e = JSON.parse(ev.data);
         if (!ready) events.push(e);

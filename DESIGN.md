@@ -376,6 +376,25 @@ independent.
 - **Redaction.** Every log line and UI payload passes through a redactor
   seeded with the real key values plus generic key patterns.
 
+## 12b. Dashboard and MCP server hardening
+
+Both local servers bind to 127.0.0.1, but loopback alone is not a boundary:
+a web page in the user's browser can POST to it (CSRF), DNS rebinding can
+read it, and a sandboxed command can `curl` it. So:
+
+- The dashboard requires a **per-launch random token** on every `/api`
+  route (`Authorization: Bearer` or `?t=`). The CLI prints the URL with the
+  token; the app stores it in `sessionStorage` and strips it from the URL.
+  Without the token nobody can answer questions, change settings, stop
+  runs or read transcripts, which also closes the "a model approves its
+  own destructive command" chain.
+- Both servers refuse requests whose `Host` is not a loopback name, and
+  the dashboard refuses non-GET requests with a foreign `Origin`.
+- Files served from run folders (model-written HTML, SVG, JS) go out as
+  `text/plain` attachments under a `sandbox` Content-Security-Policy, so
+  model output never executes on the dashboard origin.
+- Live SSE viewers are capped.
+
 ## 13. Logs and the web UI
 
 Per-run folder layout is documented in `docs/logs.md` and written as a

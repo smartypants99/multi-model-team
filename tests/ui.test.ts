@@ -247,3 +247,64 @@ describe("DashboardServer", () => {
     expect(() => new DashboardServer({ host: "0.0.0.0" as "127.0.0.1", port: 0, runsRoot, webDir, controller })).toThrow();
   });
 });
+
+describe("DashboardServer access protections", () => {
+  let server: DashboardServer;
+  let base: string;
+  let runsRoot: string;
+  const token = "t".repeat(48);
+
+  beforeAll(async () => {
+    runsRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mmt-ui-tok-"));
+    await fs.mkdir(path.join(runsRoot, "x", "output"), { recursive: true });
+    await fs.writeFile(path.join(runsRoot, "x", "output", "page.html"), "<script>alert(1)</script>");
+    await fs.writeFile(path.join(runsRoot, "x", "output", "img.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    server = new DashboardServer({ host: "127.0.0.1", port: 0, runsRoot, webDir, controller: new FakeController(), token });
+    base = (await server.start()).url.replace(/\/$/, "");
+  });
+  afterAll(async () => {
+    await server.stop();
+    await fs.rm(runsRoot, { recursive: true, force: true });
+  });
+
+  it("requires the token on every API route, by header or query", async () => {
+    expect((await fetch(`${base}/api/runs`)).status).toBe(401);
+    expect((await fetch(`${base}/api/runs`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
+    expect((await fetch(`${base}/api/runs?t=${token}`)).status).toBe(200);
+    expect((await fetch(`${base}/api/runs?t=${"x".repeat(48)}`)).status).toBe(401);
+    expect((await fetch(`${base}/api/runs/x/answer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questionId: "q", text: "yes", approved: true }) })).status).toBe(401);
+  });
+  it("still serves the static app without a token", async () => {
+    expect((await fetch(`${base}/`)).status).toBe(200);
+  });
+  it("refuses foreign Host headers and cross-origin writes", async () => {
+    // fetch() will not override Host, so use node:http for the rebinding case.
+    const http = await import("node:http");
+    const port = server.port();
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port, path: "/api/runs", headers: { authorization: `Bearer ${token}`, host: "evil.example" } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(status).toBe(403);
+    const cross = await fetch(`${base}/api/runs/x/stop`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", origin: "http://evil.example" }, body: "{}" });
+    expect(cross.status).toBe(403);
+    const same = await fetch(`${base}/api/runs/x/stop`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", origin: base }, body: "{}" });
+    expect(same.status).toBe(200);
+    const rebound = await new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port, path: "/", headers: { host: "evil.example" } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(rebound).toBe(403); // even the static app is refused under a foreign Host
+  });
+  it("never serves model-written HTML as an active document", async () => {
+    const res = await fetch(`${base}/api/runs/x/file?path=output/page.html&t=${token}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^text\/plain/);
+    expect(res.headers.get("content-disposition")).toBe("attachment");
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
+    const img = await fetch(`${base}/api/runs/x/file?path=output/img.png&t=${token}`);
+    expect(img.headers.get("content-type")).toBe("image/png");
+  });
+});

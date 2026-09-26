@@ -113,7 +113,7 @@ function webDir(): string {
 
 async function startServer(engine: Engine, port: number): Promise<DashboardServer> {
   for (let p = port; p < port + 20; p++) {
-    const s = new DashboardServer({ host: "127.0.0.1", port: p, runsRoot: engine.runsRoot, webDir: webDir(), controller: engine });
+    const s = new DashboardServer({ host: "127.0.0.1", port: p, runsRoot: engine.runsRoot, webDir: webDir(), controller: engine, token: engine.token });
     try {
       await s.start();
       return s;
@@ -187,8 +187,8 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   const terminal = isChild ? (process.env.MMT_UNATTENDED === "1" ? { ask: async (q: UserQuestion) => unattendedAnswer(q) } : undefined) : terminalInteraction();
   const live = engine.startRun({ request, mock, outDir, overrides, autoAnswer: !!args.flags.yes, reselect: !!args.flags.reselect, runId, terminal, resumeFrom });
   if (isChild) armChildLifetime(Number(process.env.MMT_DETACHED_MAX_HOURS ?? 12), () => { engine.control(live.runId, "stop"); setTimeout(() => process.exit(0), 5000).unref(); });
-  const dashboard = server ? `${server.url()}#/run/${live.runId}` : undefined;
-  engine.writeControlFile(live.runId, { dashboard, port: server?.port() });
+  const dashboard = server ? `${server.url()}?t=${engine.token}#/run/${live.runId}` : undefined;
+  engine.writeControlFile(live.runId, { dashboard, port: server?.port(), token: server ? engine.token : undefined });
   if (!isChild) {
     process.stdout.write(`run ${live.runId}\nlogs: ${live.outDir}\n${dashboard ? `dashboard: ${dashboard}\n` : ""}`);
     if (dashboard && loaded.config.ui.openBrowser && !process.env.CI) openBrowser(dashboard);
@@ -218,7 +218,7 @@ function armChildLifetime(hours: number, onExpire: () => void): void {
   t.unref();
 }
 
-async function controlFor(loaded: ReturnType<typeof loadConfig>, runId: string): Promise<{ port?: number; outDir?: string }> {
+async function controlFor(loaded: ReturnType<typeof loadConfig>, runId: string): Promise<{ port?: number; outDir?: string; token?: string }> {
   const file = path.join(loaded.config.homeDir, "run-control", `${runId}.json`);
   if (!fs.existsSync(file)) return { outDir: path.join(loaded.config.homeDir, "runs", runId) };
   return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -229,7 +229,7 @@ async function fetchStatus(loaded: ReturnType<typeof loadConfig>, runId: string)
   if (c.port) {
     try {
       // Status is computed server-side so polling stays cheap even for long runs.
-      const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/status`);
+      const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/status`, { headers: authHeaders(c) });
       if (res.ok) return { ...((await res.json()) as any), outDir: c.outDir };
     } catch {
       /* server gone: fall back to disk */
@@ -237,6 +237,10 @@ async function fetchStatus(loaded: ReturnType<typeof loadConfig>, runId: string)
   }
   if (c.outDir && fs.existsSync(path.join(c.outDir, "events.jsonl"))) return statusFromEvents(runId, readRunEvents(c.outDir), c.outDir);
   return { runId, status: "unknown", pendingQuestions: [], outDir: c.outDir };
+}
+
+function authHeaders(c: { token?: string }): Record<string, string> {
+  return c.token ? { authorization: `Bearer ${c.token}` } : {};
 }
 
 async function cmdStatus(loaded: ReturnType<typeof loadConfig>, args: Args, wait: boolean): Promise<number> {
@@ -277,7 +281,7 @@ async function cmdAnswer(loaded: ReturnType<typeof loadConfig>, args: Args): Pro
     answer.data = { mode: "manual", modelId, reasoning };
   }
   try {
-    const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/answer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(answer) });
+    const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/answer`, { method: "POST", headers: { ...authHeaders(c), "content-type": "application/json" }, body: JSON.stringify(answer) });
     process.stdout.write((await res.text()) + "\n");
     return res.ok ? 0 : 1;
   } catch {
@@ -298,7 +302,7 @@ async function cmdControl(loaded: ReturnType<typeof loadConfig>, args: Args, act
     return 1;
   }
   try {
-    const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/${action}`, { method: "POST" });
+    const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/${action}`, { method: "POST", headers: { ...authHeaders(c), "content-type": "application/json" }, body: "{}" });
     process.stdout.write((await res.text()) + "\n");
     return res.ok ? 0 : 1;
   } catch {
@@ -364,8 +368,9 @@ async function cmdDoctor(loaded: ReturnType<typeof loadConfig>, mock: boolean): 
 async function cmdServe(loaded: ReturnType<typeof loadConfig>, args: Args, mock: boolean): Promise<number> {
   const engine = new Engine(loaded, mock);
   const server = await startServer(engine, Number(args.flags.port ?? loaded.config.ui.port));
-  process.stdout.write(`dashboard: ${server.url()}\n(press Ctrl+C to stop)\n`);
-  if (loaded.config.ui.openBrowser && !process.env.CI) openBrowser(server.url());
+  const url = `${server.url()}?t=${engine.token}`;
+  process.stdout.write(`dashboard: ${url}\n(the URL carries this session's access token; press Ctrl+C to stop)\n`);
+  if (loaded.config.ui.openBrowser && !process.env.CI) openBrowser(url);
   await new Promise(() => {});
   return 0;
 }

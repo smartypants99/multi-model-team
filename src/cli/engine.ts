@@ -4,6 +4,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import type { DetectedProvider, Interaction, MemberSelection, Profile, RunEvent, UserAnswer, UserQuestion } from "../core/types.js";
 import { EventBus } from "../core/events.js";
 import type { LoadedConfig } from "../config/load.js";
@@ -44,6 +45,8 @@ export interface StartRunOptions {
 export class Engine implements DashboardController {
   readonly runs = new Map<string, LiveRun>();
   private providersCache?: { providers: DetectedProvider[]; at: number };
+  /** Dashboard access token for this process (see DashboardServerOptions.token). */
+  readonly token = crypto.randomBytes(24).toString("hex");
   constructor(readonly loaded: LoadedConfig, readonly mock = false) {}
 
   get runsRoot(): string {
@@ -99,7 +102,7 @@ export class Engine implements DashboardController {
       /* corrupt or mid-write: overwrite */
     }
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ ...prev, ...data }, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify({ ...prev, ...data }, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, file);
   }
   readControlFile(runId: string): Record<string, any> | undefined {

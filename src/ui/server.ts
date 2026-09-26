@@ -6,6 +6,7 @@
  * DashboardController.
  */
 import http from "node:http";
+import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
@@ -21,7 +22,16 @@ export interface DashboardServerOptions {
   /** Folder with index.html, app.js, styles.css. */
   webDir: string;
   controller: DashboardController;
+  /**
+   * Per-launch access token. When set, every /api request must carry it
+   * (`Authorization: Bearer <token>` or `?t=<token>`), so neither a web page
+   * in the user's browser (CSRF / DNS rebinding) nor a sandboxed command can
+   * drive the run or read transcripts without the URL the CLI printed.
+   */
+  token?: string;
 }
+
+const MAX_SSE_CLIENTS = 32;
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const KEEPALIVE_MS = 15_000;
@@ -134,13 +144,40 @@ export class DashboardServer {
   // Routing
   // ---------------------------------------------------------------------
 
+  /** Only loopback hosts may address this server (DNS rebinding sends a foreign Host header). */
+  private hostAllowed(req: http.IncomingMessage): boolean {
+    const host = String(req.headers.host ?? "").toLowerCase();
+    const port = this.port();
+    return host === `127.0.0.1:${port}` || host === `localhost:${port}` || host === "127.0.0.1" || host === "localhost" || host === `[::1]:${port}`;
+  }
+
+  private originAllowed(req: http.IncomingMessage): boolean {
+    const origin = req.headers.origin;
+    if (!origin) return true; // same-origin fetches and non-browser clients send no Origin
+    const port = this.port();
+    return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}` || origin === `http://[::1]:${port}`;
+  }
+
+  private tokenOk(req: http.IncomingMessage, url: URL): boolean {
+    if (!this.opts.token) return true;
+    const auth = String(req.headers.authorization ?? "");
+    const presented = auth.startsWith("Bearer ") ? auth.slice(7).trim() : url.searchParams.get("t") ?? "";
+    if (presented.length !== this.opts.token.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(presented), Buffer.from(this.opts.token));
+  }
+
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const method = req.method ?? "GET";
     const p = url.pathname;
 
+    if (!this.hostAllowed(req)) throw new HttpError(403, "forbidden host");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
     if (p.startsWith("/api/")) {
       res.setHeader("Cache-Control", "no-store");
+      if (!this.tokenOk(req, url)) throw new HttpError(401, "missing or invalid access token: open the dashboard from the URL the CLI printed");
+      if (method !== "GET" && !this.originAllowed(req)) throw new HttpError(403, "cross-origin request refused");
       const segs = p.split("/").filter(Boolean); // ["api", ...]
       if (segs[1] === "runs") {
         if (segs.length === 2 && method === "GET") return this.json(res, await this.opts.controller.listRuns());
@@ -205,6 +242,10 @@ export class DashboardServer {
       "X-Accel-Buffering": "no",
     });
     res.write(": connected\n\n");
+    if (this.sseClients.size >= MAX_SSE_CLIENTS) {
+      res.end("event: error\ndata: \"too many live viewers\"\n\n");
+      return;
+    }
     this.sseClients.add(res);
 
     const send = (e: RunEvent): void => {
@@ -253,7 +294,16 @@ export class DashboardServer {
     const custom = this.opts.controller.runDir ? await this.opts.controller.runDir(runId) : undefined;
     const runDir = custom ?? path.join(this.runsRoot, runId);
     const target = await this.jail(runDir, rel);
-    await this.sendFile(target, res);
+    // Run folders contain model-written files: never let HTML/SVG/JS execute on the dashboard origin.
+    const ext = path.extname(target).toLowerCase();
+    const active = [".html", ".htm", ".svg", ".js", ".mjs", ".xml", ".xhtml"].includes(ext);
+    res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+    if (active) {
+      res.setHeader("Content-Disposition", "attachment");
+      await this.sendFile(target, res, "text/plain; charset=utf-8");
+    } else {
+      await this.sendFile(target, res);
+    }
   }
 
   private async staticFile(pathname: string, res: http.ServerResponse): Promise<void> {
@@ -284,7 +334,7 @@ export class DashboardServer {
     return realTarget;
   }
 
-  private async sendFile(file: string, res: http.ServerResponse): Promise<void> {
+  private async sendFile(file: string, res: http.ServerResponse, typeOverride?: string): Promise<void> {
     let stat: fs.Stats;
     try {
       stat = await fsp.stat(file);
@@ -292,7 +342,7 @@ export class DashboardServer {
       throw new HttpError(404, "not found");
     }
     if (!stat.isFile()) throw new HttpError(404, "not found");
-    const type = CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+    const type = typeOverride ?? CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
     res.writeHead(200, {
       "Content-Type": type,
       "Content-Length": stat.size,
