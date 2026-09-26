@@ -324,7 +324,8 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
 
     const search = searchBackendFromConfig(cfg.search, opts.env, opts.mock);
     const shots = screenshotTool({ mock: opts.mock, outDir: path.join(outDir, "screenshots"), resolveInSandbox: (mid, rel) => sb.resolveInside(mid, rel), sandboxRootOf: (mid) => sb.sandboxDir(mid) });
-    const gate = { guard, interaction: { ask: (q: UserQuestion) => opts.interaction.ask(q) }, bus, destructivePatterns: cfg.safety.destructivePatterns, commandTimeoutMs: cfg.safety.commandTimeoutMs, vote, labelOf, idOfLabel, isolationFor };
+    const strict = isoKind.kind === "none";
+    const gate = { guard, interaction: { ask: (q: UserQuestion) => opts.interaction.ask(q) }, bus, destructivePatterns: cfg.safety.destructivePatterns, commandTimeoutMs: cfg.safety.commandTimeoutMs, vote, labelOf, idOfLabel, isolationFor, strict };
     const allTools: Record<string, ToolDefinition> = {};
     if (search) allTools.web_search = webSearchTool(search, cfg.search.maxResults);
     allTools.fetch_url = fetchUrlTool({ mock: opts.mock });
@@ -692,7 +693,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         const hash = sb.hashFiles(dir, suite.suitePatterns);
         // A member can put anything in package.json "test"; treat the resolved script like any other command.
         const script = resolvedTestScript(dir, suite.command);
-        const dc = needsConfirmation(script, dir, dir, cfg.safety.destructivePatterns);
+        const dc = needsConfirmation(script, dir, dir, cfg.safety.destructivePatterns, strict);
         const g = guard.check({ command: script, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs });
         if (dc.needed || g.decision === "block") {
           const reason = dc.needed ? `test command reaches outside the sandbox (${dc.classification.reason})` : `resource guard: ${g.reason}`;

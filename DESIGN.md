@@ -383,8 +383,13 @@ independent.
   `.env` files, `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, keychains and
   browser profiles are unreadable; the network stays open so installs and
   searches work. Hosts without a mechanism (Windows, Linux without bwrap)
-  fall back to the classifier plus confirmation, and `mmt doctor` and the
-  run log say so plainly. `safety.osSandbox: "off"` disables it;
+  fall back to a **strict** classifier: any reference outside the sandbox,
+  any construct a regex cannot see through (variable expansion, command
+  substitution, `eval`, `sh -c`, inline `python -c`/`node -e`, `xargs`,
+  `find -exec/-delete`, heredocs) and any exfiltration or persistence
+  command (`curl -d`, `nc`, `ssh`, `crontab`, `launchctl`, `| sh`, …)
+  needs the user's confirmation. That costs more prompts on such hosts, by
+  design. `mmt doctor` and the run log say which mode is active. `safety.osSandbox: "off"` disables it;
   `safety.sandboxWriteAllow` / `sandboxReadDeny` extend the sets.
 - **Redaction.** Every log line and UI payload passes through a redactor
   seeded with the real key values plus generic key patterns.
