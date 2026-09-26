@@ -398,8 +398,12 @@ export function changedFiles(a: string, b: string): string[] {
   const list = (root: string) => {
     const out = new Map<string, string>();
     if (!fs.existsSync(root)) return out;
-    walk(root, ALWAYS_SKIP, (abs, entry) => {
-      if (!entry.isDirectory()) out.set(toPosix(path.relative(root, abs)), abs);
+    walk(root, ALWAYS_SKIP, (abs) => {
+      try {
+        if (fs.statSync(abs).isFile()) out.set(toPosix(path.relative(root, abs)), abs);
+      } catch {
+        /* unreadable entry: ignore */
+      }
       return true;
     });
     return out;
