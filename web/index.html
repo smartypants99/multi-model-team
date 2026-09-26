@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Team console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">Team console</a>
+    <div class="run-picker">
+      <select id="run-select" aria-label="Run"></select>
+      <span id="run-live" class="live-dot" hidden title="Live run"></span>
+    </div>
+    <span id="stage-badge" class="stage-badge">no run</span>
+    <div class="totals" id="totals" title="Cost and tokens so far">
+      <span class="total-usd" id="total-usd">$0.00</span>
+      <span class="total-tokens" id="total-tokens">0 tokens</span>
+    </div>
+    <div class="controls">
+      <button id="btn-pause" class="btn" title="Pause the run">Pause</button>
+      <button id="btn-resume" class="btn" title="Resume the run">Resume</button>
+      <button id="btn-stop" class="btn btn-danger" title="Stop the run">Stop</button>
+    </div>
+    <nav class="nav">
+      <a href="#/" data-route="run">Run</a>
+      <a href="#/settings" data-route="settings">Settings</a>
+    </nav>
+    <button id="theme-toggle" class="btn btn-icon" title="Switch theme" aria-label="Switch theme">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3"/></svg>
+    </button>
+  </header>
+
+  <div id="replay-bar" class="replay-bar" hidden>
+    <button id="replay-play" class="btn">Play</button>
+    <input id="replay-scrub" type="range" min="0" max="0" value="0" aria-label="Scrub events">
+    <span id="replay-pos" class="replay-pos">0 / 0</span>
+    <select id="replay-speed" aria-label="Replay speed">
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="5">5x</option>
+      <option value="20">20x</option>
+    </select>
+    <button id="replay-end" class="btn">Jump to end</button>
+  </div>
+
+  <main id="page-run" class="page page-run">
+    <aside class="col col-left">
+      <section class="panel">
+        <h2>Timeline</h2>
+        <div id="timeline" class="timeline"></div>
+      </section>
+      <section class="panel">
+        <h2>Team</h2>
+        <p class="hint">Real model names are shown here and in the logs only. Models see each other as anonymous labels.</p>
+        <div id="roster" class="roster"></div>
+      </section>
+    </aside>
+
+    <section class="col col-center">
+      <div class="tabs" id="channel-tabs" role="tablist"></div>
+      <div id="chat" class="chat" aria-live="polite"></div>
+    </section>
+
+    <aside class="col col-right">
+      <div class="tabs" id="side-tabs" role="tablist"></div>
+      <div id="side" class="side"></div>
+    </aside>
+  </main>
+
+  <main id="page-settings" class="page page-settings" hidden>
+    <div class="settings-wrap">
+      <div class="settings-head">
+        <h1>Team settings</h1>
+        <p class="hint">Each detected provider can contribute one or more team members. The lead must be an Anthropic model. Keys are read from your environment and never shown here.</p>
+        <div class="settings-actions">
+          <button id="settings-refresh" class="btn">Refresh providers</button>
+          <button id="settings-save" class="btn btn-primary">Save profile</button>
+          <span id="settings-status" class="status-text"></span>
+        </div>
+      </div>
+      <div id="providers" class="providers"></div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>
