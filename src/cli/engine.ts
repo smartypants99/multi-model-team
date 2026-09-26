@@ -89,8 +89,15 @@ export class Engine implements DashboardController {
   }
   writeControlFile(runId: string, data: Record<string, unknown>): void {
     const file = path.join(this.controlDir(), `${runId}.json`);
-    const prev = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
-    fs.writeFileSync(file, JSON.stringify({ ...prev, ...data }, null, 2));
+    let prev: Record<string, unknown> = {};
+    try {
+      if (fs.existsSync(file)) prev = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      /* corrupt or mid-write: overwrite */
+    }
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ ...prev, ...data }, null, 2));
+    fs.renameSync(tmp, file);
   }
   readControlFile(runId: string): Record<string, any> | undefined {
     const file = path.join(this.controlDir(), `${runId}.json`);
@@ -117,6 +124,9 @@ export class Engine implements DashboardController {
       }
     }
     return out.sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+  }
+  status(runId: string): Record<string, unknown> {
+    return statusFromEvents(runId, this.readEvents(runId), this.runDir(runId));
   }
   runDir(runId: string): string | undefined {
     const live = this.runs.get(runId);

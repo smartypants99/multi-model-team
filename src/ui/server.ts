@@ -149,6 +149,10 @@ export class DashboardServer {
         const action = segs[3];
         if (segs.length === 4) {
           if (method === "GET" && action === "events") return this.json(res, await this.opts.controller.readEvents(runId));
+          if (method === "GET" && action === "status") {
+            if (this.opts.controller.status) return this.json(res, await this.opts.controller.status(runId));
+            throw new HttpError(404, "status not supported");
+          }
           if (method === "GET" && action === "stream") return this.stream(runId, req, res);
           if (method === "GET" && action === "file") return this.runFile(runId, url.searchParams.get("path") ?? "", res);
           if (method === "POST" && action === "answer") {

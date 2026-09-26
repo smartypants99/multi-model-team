@@ -74,6 +74,14 @@ export class SandboxManager {
     return dir;
   }
 
+  /** Replace a member's sandbox contents with a copy of `fromDir` (previous contents are removed). */
+  reseed(memberId: string, fromDir: string): string {
+    const dir = this.sandboxDir(memberId);
+    cleanDir(dir);
+    if (fs.existsSync(fromDir)) copyTree(path.resolve(fromDir), dir, SEED_SKIP);
+    return dir;
+  }
+
   // ---------------------------------------------------------------------------
   // path jail
   // ---------------------------------------------------------------------------

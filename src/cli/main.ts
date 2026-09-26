@@ -52,6 +52,7 @@ Commands:
   status <runId>            status + pending questions as JSON
   wait <runId> [--timeout-sec N]   block until finished or a question is pending
   answer <runId> <questionId> "<text>" [--approve|--deny]
+  stop|pause|resume <runId>  control a live run
   providers [--refresh]     detect keys and list live models with capabilities
   settings                  show the saved model profile
   runs                      list runs
@@ -78,6 +79,10 @@ async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdStatus(loaded, args, cmd === "wait");
     case "answer":
       return cmdAnswer(loaded, args);
+    case "stop":
+    case "pause":
+    case "resume":
+      return cmdControl(loaded, args, cmd);
     case "providers":
       return cmdProviders(loaded, args, mock);
     case "settings": {
@@ -128,7 +133,7 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   if (args.flags.detach) {
     // Spawn a child that hosts the run + dashboard, then print its control info.
     const runId = newRunId();
-    const childArgs = [fileURLToPath(import.meta.url), "run", "--serve-child", "--run-id", runId, "--request", request, ...(mock ? ["--mock"] : []), ...(outDir ? ["--out", outDir] : []), ...(args.flags.yes ? ["--yes"] : []), ...(args.flags.reselect ? ["--reselect"] : []), ...(Array.isArray(args.flags.model) ? args.flags.model.flatMap((m) => ["--model", m]) : [])];
+    const childArgs = [fileURLToPath(import.meta.url), "run", "--serve-child", "--run-id", runId, "--request", request, ...(mock ? ["--mock"] : []), ...(outDir ? ["--out", outDir] : []), ...(args.flags.yes ? ["--yes"] : []), ...(args.flags.reselect ? ["--reselect"] : []), ...(Array.isArray(args.flags.model) ? args.flags.model.flatMap((m) => ["--model", m]) : []), ...(typeof args.flags["cost-cap"] === "string" ? ["--cost-cap", args.flags["cost-cap"]] : []), ...(typeof args.flags.config === "string" ? ["--config", args.flags.config] : [])];
     const logFile = path.join(engine.runsRoot, `${runId}.child.log`);
     const fd = fs.openSync(logFile, "a");
     const child = spawn(process.execPath, childArgs, { detached: true, stdio: ["ignore", fd, fd], windowsHide: true, env: process.env });
@@ -137,7 +142,12 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
     for (let i = 0; i < 100; i++) {
       await new Promise((r) => setTimeout(r, 200));
       if (fs.existsSync(ctl)) {
-        const c = JSON.parse(fs.readFileSync(ctl, "utf8"));
+        let c: any;
+        try {
+          c = JSON.parse(fs.readFileSync(ctl, "utf8"));
+        } catch {
+          continue; // written concurrently; try again
+        }
         if (c.dashboard) {
           process.stdout.write(JSON.stringify({ runId, outDir: c.outDir, dashboard: c.dashboard, pid: child.pid }) + "\n");
           return 0;
@@ -191,8 +201,9 @@ async function fetchStatus(loaded: ReturnType<typeof loadConfig>, runId: string)
   const c = await controlFor(loaded, runId);
   if (c.port) {
     try {
-      const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/events`);
-      if (res.ok) return statusFromEvents(runId, (await res.json()) as any, c.outDir);
+      // Status is computed server-side so polling stays cheap even for long runs.
+      const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/status`);
+      if (res.ok) return { ...((await res.json()) as any), outDir: c.outDir };
     } catch {
       /* server gone: fall back to disk */
     }
@@ -238,9 +249,35 @@ async function cmdAnswer(loaded: ReturnType<typeof loadConfig>, args: Args): Pro
     const [modelId, reasoning] = text.split(":");
     answer.data = { mode: "manual", modelId, reasoning };
   }
-  const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/answer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(answer) });
-  process.stdout.write((await res.text()) + "\n");
-  return res.ok ? 0 : 1;
+  try {
+    const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/answer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(answer) });
+    process.stdout.write((await res.text()) + "\n");
+    return res.ok ? 0 : 1;
+  } catch {
+    process.stderr.write("run is not reachable (its process has exited); nothing to answer\n");
+    return 1;
+  }
+}
+
+async function cmdControl(loaded: ReturnType<typeof loadConfig>, args: Args, action: string): Promise<number> {
+  const runId = args._[1];
+  if (!runId) {
+    process.stderr.write("runId required\n");
+    return 2;
+  }
+  const c = await controlFor(loaded, runId);
+  if (!c.port) {
+    process.stderr.write("run is not live (no dashboard port recorded)\n");
+    return 1;
+  }
+  try {
+    const res = await fetch(`http://127.0.0.1:${c.port}/api/runs/${encodeURIComponent(runId)}/${action}`, { method: "POST" });
+    process.stdout.write((await res.text()) + "\n");
+    return res.ok ? 0 : 1;
+  } catch {
+    process.stderr.write("run is not reachable (its process has exited)\n");
+    return 1;
+  }
 }
 
 async function cmdProviders(loaded: ReturnType<typeof loadConfig>, args: Args, mock: boolean): Promise<number> {
@@ -267,7 +304,15 @@ async function cmdServe(loaded: ReturnType<typeof loadConfig>, args: Args, mock:
   return 0;
 }
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const samePath = (a: string, b: string) => {
+  const norm = (p: string) => {
+    let r = path.resolve(p);
+    try { r = fs.realpathSync(r); } catch { /* keep */ }
+    return process.platform === "win32" ? r.toLowerCase() : r;
+  };
+  return norm(a) === norm(b);
+};
+const isMain = !!process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url));
 if (isMain) {
   main().then((code) => process.exit(code), (e) => {
     process.stderr.write(`error: ${e?.message ?? e}\n`);

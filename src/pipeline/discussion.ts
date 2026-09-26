@@ -73,27 +73,38 @@ export async function runDiscussion(llm: Llm, bus: EventBus, opts: DiscussionOpt
     const members = live();
     if (members.length < 2) {
       endedBy = "members-exhausted";
+      round--;
       break;
     }
-    const devil = members[(round - 1) % members.length];
+    // Blind round has no consensus to argue against, so no devil's advocate; afterwards rotate,
+    // starting at an offset derived from the task id so different discussions start with different agents.
+    const offset = [...opts.taskId + opts.channel].reduce((a, c) => a + c.charCodeAt(0), 0);
+    const devil = round === 1 ? undefined : members[(round - 2 + offset) % members.length];
     const transcript = renderTranscript(summaries, transcriptRounds);
     const roundTurns: AgentTurn[] = [];
 
     const takeTurn = async (m: TeamMember): Promise<AgentTurn | undefined> => {
-      const role = m.id === devil.id ? "devils-advocate" : undefined;
+      const role = devil && m.id === devil.id ? "devils-advocate" : undefined;
       const seen = round === 1 ? "" : transcript; // blind first round
       const system = opts.systemFor(m, round, role, seen);
       const user = round === 1 ? opts.opening : `${opts.opening}\n\n=== Discussion so far ===\n${seen}\n=== End ===\n\nThis is round ${round}. Respond with your JSON turn.`;
       try {
         const { json, result } = await llm.callJson<any>(
           { member: m, stage: opts.stage, taskId: opts.taskId, system, messages: [textMessage("user", user)], tools: opts.tools, toolCtx: opts.toolCtxFor?.(m), tag: `${opts.channel}/r${round}/${m.label}`, signal: opts.signal },
-          (o) => (typeof o.message !== "string" || typeof o.rationale !== "string" ? "message and rationale must be strings" : (o.vote !== "done" && o.vote !== "continue" ? "vote must be 'done' or 'continue'" : undefined)),
+          (o) => {
+            if (typeof o.message !== "string" || typeof o.rationale !== "string") return "message and rationale must be strings";
+            if (o.vote !== "done" && o.vote !== "continue") return "vote must be 'done' or 'continue'";
+            if (o.position_change && typeof o.position_change === "object" && !(typeof o.position_change.evidence === "string" && o.position_change.evidence.trim().length > 10))
+              return "a position_change needs 'evidence' tied to a test result, a source or a specific line of code (agreement is not evidence); include it or drop the position_change";
+            return undefined;
+          },
         );
         let positionChange = json.position_change && typeof json.position_change === "object" ? json.position_change : undefined;
         let unsupported = false;
         if (positionChange && !(typeof positionChange.evidence === "string" && positionChange.evidence.trim().length > 10)) {
           unsupported = true;
           positionChange = { ...positionChange, evidence: "(unsupported: no evidence given; ignored for consensus)" };
+          json.vote = "continue"; // an unsupported change cannot help close the discussion
         }
         if (typeof json.approve === "boolean") approvals[m.id] = json.approve;
         if (Array.isArray(json.amendments)) amendments.push(...json.amendments.filter((a: unknown) => typeof a === "string"));
@@ -118,7 +129,8 @@ export async function runDiscussion(llm: Llm, bus: EventBus, opts: DiscussionOpt
         return turn;
       } catch (e) {
         if (e instanceof MemberFailedError) {
-          bus.emit("chat.message", { channel: "system", round, memberId: m.id, label: m.label, message: `${m.label} dropped out of the discussion: ${e.message}`, rationale: "" }, { stage: opts.stage, taskId: opts.taskId, memberId: m.id });
+          const permanent = !!m.disabledReason;
+          bus.emit("chat.message", { channel: "system", round, memberId: m.id, label: m.label, message: permanent ? `${m.label} dropped out of the discussion: ${e.message}` : `${m.label} skipped round ${round} (no valid reply: ${e.message})`, rationale: "" }, { stage: opts.stage, taskId: opts.taskId, memberId: m.id });
           return undefined;
         }
         throw e;
@@ -133,10 +145,10 @@ export async function runDiscussion(llm: Llm, bus: EventBus, opts: DiscussionOpt
         const t = await takeTurn(m);
         if (t) roundTurns.push(t);
         // Later speakers in the same round see earlier speakers of this round.
-        transcriptRounds[round - 1] = renderRound(round, roundTurns, devil.label);
+        transcriptRounds[round - 1] = renderRound(round, roundTurns, devil?.label);
       }
     }
-    transcriptRounds[round - 1] = renderRound(round, roundTurns, devil.label);
+    transcriptRounds[round - 1] = renderRound(round, roundTurns, devil?.label);
     turns.push(...roundTurns);
 
     const stillLive = live();
@@ -163,8 +175,8 @@ export async function runDiscussion(llm: Llm, bus: EventBus, opts: DiscussionOpt
   return { turns, rounds: round, endedBy, transcript: renderTranscript(summaries, transcriptRounds), summaries, approvals, amendments };
 }
 
-export function renderRound(round: number, turns: AgentTurn[], devilLabel: string): string {
-  const head = `--- Round ${round} (devil's advocate: ${devilLabel}) ---`;
+export function renderRound(round: number, turns: AgentTurn[], devilLabel?: string): string {
+  const head = `--- Round ${round}${devilLabel ? ` (devil's advocate: ${devilLabel})` : " (independent positions)"} ---`;
   const body = turns.map((t) => {
     const pc = t.positionChange ? `\n  [position change: ${t.positionChange.from} -> ${t.positionChange.to}; evidence: ${t.positionChange.evidence}]` : "";
     return `${t.label}${t.role ? " (devil's advocate)" : ""}: ${t.message}${pc}\n  [vote: ${t.vote}]`;

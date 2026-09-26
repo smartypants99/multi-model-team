@@ -5,6 +5,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import type { TestResult, TestRun, CommandResult } from "../core/types.js";
 
 export interface DetectedSuite {
@@ -32,11 +33,22 @@ export function detectTestCommand(dir: string, configured?: string): DetectedSui
   }
   if (has("pytest.ini") || has("pyproject.toml") || has("setup.py") || has("tests") || has("test")) {
     const pyTests = ["tests", "test"].some((d) => fs.existsSync(path.join(dir, d)) && fs.readdirSync(path.join(dir, d)).some((f) => /\.py$/.test(f)));
-    if (pyTests || has("pytest.ini")) return { command: "python -m pytest -v -p no:cacheprovider", suitePatterns: ["tests/**", "test/**", "**/test_*.py", "**/*_test.py"], kind: "pytest" };
+    if (pyTests || has("pytest.ini")) return { command: `${pythonCommand()} -m pytest -v -p no:cacheprovider`, suitePatterns: ["tests/**", "test/**", "**/test_*.py", "**/*_test.py"], kind: "pytest" };
   }
   if (has("go.mod")) return { command: "go test -v ./...", suitePatterns: ["**/*_test.go"], kind: "go" };
   if (has("Cargo.toml")) return { command: "cargo test", suitePatterns: ["tests/**", "src/**"], kind: "cargo" };
   return undefined;
+}
+
+let pythonCmd: string | undefined;
+/** "python" where it exists, else "python3" (macOS/Linux hosts often ship only python3). */
+export function pythonCommand(): string {
+  if (pythonCmd) return pythonCmd;
+  for (const c of ["python", "python3"]) {
+    const r = spawnSync(c, ["--version"], { stdio: "ignore", windowsHide: true });
+    if (!r.error && r.status === 0) return (pythonCmd = c);
+  }
+  return (pythonCmd = "python");
 }
 
 export function parseTestOutput(kind: DetectedSuite["kind"], res: CommandResult): TestResult[] {
@@ -104,6 +116,16 @@ export function compareRuns(best: TestRun | undefined, candidate: TestRun): { cr
     if (!candidate.results.length) return { crown: false, reason: "no tests ran" };
     if (!candidate.results.some((r) => r.passed)) return { crown: false, reason: "first candidate must pass at least one test" };
     return { crown: true, reason: "first measured version" };
+  }
+  // When either side could only be measured as a whole ("suite"), compare aggregates.
+  const isFallback = (r: TestRun) => r.results.length === 1 && r.results[0].name === "suite";
+  if (isFallback(best) !== isFallback(candidate) || (isFallback(best) && isFallback(candidate))) {
+    const bestOk = best.failed === 0 && best.passed > 0;
+    const candOk = candidate.failed === 0 && candidate.passed > 0;
+    if (bestOk && !candOk) return { crown: false, reason: "suite fails where the best passed" };
+    if (!bestOk && candOk) return { crown: true, reason: "suite passes where the best failed" };
+    if (candOk && candidate.results.length > best.results.length) return { crown: true, reason: "more passing tests, none failing" };
+    return { crown: false, reason: "no measurable improvement (coarse comparison)" };
   }
   const candMap = new Map(candidate.results.map((r) => [r.name, r.passed]));
   const regressions: string[] = [];

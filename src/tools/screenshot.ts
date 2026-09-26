@@ -6,9 +6,47 @@
  * tiny placeholder PNG so the whole flow (files, logs, UI) is exercised.
  */
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import type { AddressInfo } from "node:net";
 import type { ToolDefinition, ContentPart } from "../core/types.js";
+
+const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp", ".wasm": "application/wasm", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".woff": "font/woff", ".woff2": "font/woff2", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav" };
+
+/**
+ * Serve a sandbox directory on 127.0.0.1 for the duration of a screenshot.
+ * file:// URLs cannot load ES-module scripts or fetch() assets (CORS), so
+ * browser apps must be served over HTTP to render the way they would for users.
+ */
+export async function serveDirectory(root: string): Promise<{ origin: string; close: () => Promise<void> }> {
+  const base = path.resolve(root);
+  const server = http.createServer((req, res) => {
+    try {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      let rel = decodeURIComponent(url.pathname);
+      if (rel.endsWith("/")) rel += "index.html";
+      const target = path.resolve(base, "." + rel);
+      if (target !== base && !target.startsWith(base + path.sep)) {
+        res.writeHead(403).end();
+        return;
+      }
+      if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+        res.writeHead(404).end("not found");
+        return;
+      }
+      res.writeHead(200, { "content-type": MIME[path.extname(target).toLowerCase()] ?? "application/octet-stream", "cache-control": "no-store" });
+      fs.createReadStream(target).pipe(res);
+    } catch {
+      res.writeHead(500).end();
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const port = (server.address() as AddressInfo).port;
+  return { origin: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(() => r())) };
+}
 
 export interface ScreenshotOptions {
   mock: boolean;
@@ -16,6 +54,8 @@ export interface ScreenshotOptions {
   outDir: string;
   /** Returns the absolute sandbox path for a member-relative path. */
   resolveInSandbox: (memberId: string, rel: string) => string;
+  /** Returns the member's sandbox root; the whole root is served over HTTP while capturing. */
+  sandboxRootOf?: (memberId: string) => string;
   timeoutMs?: number;
 }
 
@@ -59,12 +99,24 @@ export function screenshotTool(opts: ScreenshotOptions): ToolDefinition & { last
       const file = path.join(opts.outDir, `${Date.now()}-${ctx.member.id}-${label}.png`);
       const target = String(args.target ?? "");
       let url: string;
+      let served: Awaited<ReturnType<typeof serveDirectory>> | undefined;
       if (/^https?:\/\//i.test(target)) {
+        // Only local servers (the app under test) and public hosts; never link-local / cloud metadata addresses.
+        let host = "";
+        try { host = new URL(target).hostname; } catch { return "error: invalid URL"; }
+        if (/^(169\.254\.|100\.100\.100\.200$|fd00:ec2|fe80:|metadata)/i.test(host)) return "error: that address is not allowed";
         url = target;
       } else {
         const abs = opts.resolveInSandbox(ctx.member.id, target);
         if (!fs.existsSync(abs)) return `error: ${target} not found in your sandbox`;
-        url = pathToFileURL(abs).href;
+        if (!opts.mock) {
+          // Serve the whole sandbox so relative scripts, modules and assets load.
+          const root = opts.sandboxRootOf ? opts.sandboxRootOf(ctx.member.id) : path.dirname(abs);
+          served = await serveDirectory(root);
+          url = `${served.origin}/${path.relative(root, abs).split(path.sep).map(encodeURIComponent).join("/")}`;
+        } else {
+          url = `file://${abs}`;
+        }
       }
       if (opts.mock) {
         fs.writeFileSync(file, PLACEHOLDER_PNG);
@@ -97,11 +149,12 @@ export function screenshotTool(opts: ScreenshotOptions): ToolDefinition & { last
         lastImages.length = 0;
         lastImages.push({ type: "image", mediaType: "image/png", dataBase64: b64 });
         ctx.log({ type: "specialist.action", stage: "specialist", taskId: ctx.taskId, memberId: ctx.member.id, data: { memberId: ctx.member.id, action: "screenshot", detail: `screenshot of ${target}`, screenshotPath: file, consoleErrors } });
-        return `screenshot saved: ${file}. Page errors: ${consoleErrors.length ? consoleErrors.join(" | ") : "none"}. The image is attached in the next message.`;
+        return `screenshot saved: ${file} (served at ${url}). Page errors: ${consoleErrors.length ? consoleErrors.join(" | ") : "none"}. The image is attached in the next message.`;
       } catch (e: any) {
         return `error: screenshot failed: ${e?.message ?? e}`;
       } finally {
         await browser.close().catch(() => {});
+        await served?.close();
       }
     },
   };

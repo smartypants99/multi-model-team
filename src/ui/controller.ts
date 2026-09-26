@@ -43,6 +43,8 @@ export interface DashboardController {
   saveProfile(profile: Profile): MaybePromise<void>;
   /** Re-detect keys and models; returns the fresh provider list. */
   refreshProviders(): MaybePromise<DetectedProvider[]>;
+  /** Optional: cheap status snapshot (stage, pending questions, cost) computed server-side. */
+  status?(runId: string): MaybePromise<Record<string, unknown>>;
   /** Optional: absolute log folder of a run (when runs live outside runsRoot). */
   runDir?(runId: string): MaybePromise<string | undefined>;
 }

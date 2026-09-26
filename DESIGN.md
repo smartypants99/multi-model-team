@@ -176,6 +176,37 @@ honouring `retry-after`. A member that keeps failing is disabled with a logged
 reason; the run continues while `minMembers` (default 2, i.e. the lead plus
 one) remain. Costs come from `config.pricing` (regex-keyed), never code.
 
+### Claude Code CLI as the lead (no API key)
+
+Many people have a Claude subscription but no API key. The `claude-code`
+endpoint (protocol `claude-cli`) runs the locally installed Claude Code CLI
+in print mode as the Anthropic lead: `claude -p --output-format json` with the
+flattened conversation on stdin, `--system-prompt` for the system text,
+`--effort` for the reasoning level and `--tools ""` so none of Claude Code's
+own tools are available. Discovery adds this endpoint as a keyless candidate
+only when the `claude` binary is on PATH and no Anthropic API key was found
+(or `MMT_USE_CLAUDE_CLI=1`), so a real key always wins; its `keySource` is
+"claude login". The probe is `claude --version` plus one tiny Haiku call.
+
+Tools go through a minimal MCP server (`src/providers/mcp-tool-server.ts`,
+Streamable HTTP, JSON-RPC over POST, loopback only). Each call registers a
+session at `/mcp/<id>` with its own bearer token and its own tool list, writes
+a 0600 temp `--mcp-config`, and pre-approves the server with
+`--allowedTools mcp__mmt`; `--strict-mcp-config` keeps the user's own MCP
+servers out of the session. The CLI then runs the tool loop itself and the
+adapter returns the final text with `toolCalls: []`. To keep the logs
+identical to the native loop, `ChatRequest.toolExecutors` lets the engine's
+`Llm` execute the tools and emit `tool.call` events; the adapter only relays.
+The CLI's `total_cost_usd` is returned as `ChatResponse.costUsd` and the cost
+tracker prefers it over the price table.
+
+Limits, by design: one process per call (a few seconds of startup each);
+no thinking text comes back; images in the conversation become placeholders;
+the model list is a static config table because no models endpoint is
+reachable without a key; and a subscription's real billing is not the
+API price the CLI reports, so cost figures are estimates. The transport is
+meant for the lead only; members from other providers still use their APIs.
+
 ## 7. Work types (the extension point)
 
 A work type is a folder: `worktype.json` + `prompts/*.md`. It supplies the
@@ -219,7 +250,9 @@ closest available one and the task carries a `workTypeFallbackNote`.
 Per task:
 
 - **A do.** The lead runs the work type's `do` prompt with its tools (a tool
-  loop with `maxToolIterations`).
+  loop with `maxToolIterations`). For sandbox work types every other member's
+  sandbox is then reseeded with a copy of the lead's sandbox, so verifiers can
+  actually run the lead's code and improvers start from it.
 - **B independent verification.** Every other member runs `verify` in parallel
   (`Promise.allSettled`), each seeing only the lead's work, never each other.
 - **C group discussion.** See §9.
@@ -233,10 +266,17 @@ Per task:
 - **Improve + compete (sandbox work types only).** After the discussion, and
   again after the red team, every live member gets an "improvement round" in
   its own sandbox (same `do` prompt with the agreed changes or red-team
-  findings as instructions). Then every sandbox is a candidate (§11). The
-  crowned best is copied into every sandbox. For document work types the
-  lead writes a final revision incorporating the resolution and the
-  specialist's findings; the rubric result is recorded as the "test run".
+  findings as instructions), starting from the current best. Then every
+  sandbox is a candidate (§11). If no candidate beats the best, the round is
+  repeated with the failing test results as extra instructions, up to
+  `stallLimit` attempts ("review continues"); then the best is kept and a
+  `best.stalled` event explains why. Sandboxes are only reset to the best at
+  the start of an improvement round, never right after a competition, so the
+  red team attacks each member's own candidate rather than N copies of the
+  winner. If the discussion resolution asks for it, Step B is repeated once on
+  the crowned version. For document work types the lead writes a final
+  revision incorporating the resolution and the specialist's findings; the
+  rubric result is recorded as the "test run".
 
 Any stage can be repeated: the discussion can end with a "repeat verification"
 outcome and the orchestrator loops, bounded by `stallLimit`.
@@ -251,11 +291,14 @@ outcome and the orchestrator loops, bounded by `stallLimit`.
   transcript, then revealed together.
 - **Evidence-tied position changes.** The JSON turn has an optional
   `position_change {from, to, evidence}`. A turn that changes stance without
-  `evidence` is rejected and the model is asked once to supply it; if it still
-  cannot, the change is logged as "unsupported" and ignored for consensus.
-- **Rotating devil's advocate.** Round r assigns member `(r-1) mod N` as
-  devil's advocate; their prompt requires arguing the strongest case against
-  the current consensus. Their vote counts like anyone else's.
+  `evidence` fails validation and the model is asked once to supply it; if it
+  still cannot, the change is logged as "unsupported" and the turn's vote is
+  forced to `continue`, so an unsupported change can never close a discussion.
+- **Rotating devil's advocate.** The blind first round has no consensus to
+  argue against, so it has no devil's advocate. From round 2 the role rotates
+  through the members, starting at an offset derived from the task and
+  channel so that different discussions start with different agents (and not
+  always the lead). Their vote counts like anyone else's.
 - **Ending.** A discussion ends when every live member votes `done` in the
   same round, or at `maxDiscussionRounds` (default 6). The lead then writes a
   resolution summary that feeds the next step.

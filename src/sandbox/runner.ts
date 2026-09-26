@@ -19,7 +19,7 @@ export interface RunOptions {
 
 export const MAX_CAPTURE_BYTES = 2 * 1024 * 1024;
 const TRUNCATION_MARKER = "\n...[output truncated at 2 MB]...\n";
-const SECRET_KEY = /KEY|TOKEN|SECRET|PASSWORD/i;
+const SECRET_KEY = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_PAT$|^GH_|^GITHUB_|AUTH|COOKIE|PRIVATE/i;
 
 /** Build the environment for a sandboxed command: process.env minus secrets, plus explicit extras. */
 export function sandboxEnv(extra?: Record<string, string>): Record<string, string> {
