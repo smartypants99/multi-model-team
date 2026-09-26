@@ -408,7 +408,7 @@ export function changedFiles(a: string, b: string): string[] {
     if (!fs.existsSync(root)) return out;
     walk(root, ALWAYS_SKIP, (abs) => {
       try {
-        if (fs.statSync(abs).isFile()) out.set(toPosix(path.relative(root, abs)), abs);
+        if (fs.lstatSync(abs).isFile()) out.set(toPosix(path.relative(root, abs)), abs); // lstat: a symlink to a host file is not diffed
       } catch {
         /* unreadable entry: ignore */
       }

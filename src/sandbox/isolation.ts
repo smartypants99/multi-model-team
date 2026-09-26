@@ -152,11 +152,15 @@ export function bwrapArgs(spec: IsolationSpec, cwd: string): string[] {
   return args;
 }
 
+/** Resource limits every POSIX command runs under: no fork bombs (process count) and no disk filling (file size, 8 GB). */
+export const POSIX_LIMITS_PREFIX = "ulimit -u 2048 2>/dev/null; ulimit -f 8388608 2>/dev/null; ";
+
 /** Wrap a POSIX shell command in the host's isolation mechanism. Returns the argv to spawn. */
 export function wrapCommand(spec: IsolationSpec, command: string, cwd: string): { file: string; args: string[] } {
-  if (spec.kind === "seatbelt") return { file: "/usr/bin/sandbox-exec", args: ["-p", seatbeltProfile(spec), "/bin/sh", "-c", command] };
-  if (spec.kind === "bwrap") return { file: "bwrap", args: [...bwrapArgs(spec, cwd), "/bin/sh", "-c", command] };
-  return { file: "/bin/sh", args: ["-c", command] };
+  const limited = POSIX_LIMITS_PREFIX + command;
+  if (spec.kind === "seatbelt") return { file: "/usr/bin/sandbox-exec", args: ["-p", seatbeltProfile(spec), "/bin/sh", "-c", limited] };
+  if (spec.kind === "bwrap") return { file: "bwrap", args: [...bwrapArgs(spec, cwd), "/bin/sh", "-c", limited] };
+  return { file: "/bin/sh", args: ["-c", limited] };
 }
 
 /** One-line summary for logs and `mmt doctor`. */

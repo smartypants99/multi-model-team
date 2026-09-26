@@ -131,6 +131,8 @@ export class AnthropicAdapter implements ProviderAdapter {
       }
     }
     for (const tc of toolCalls) this.rawAssistant.set(tc.id, content);
+    // Bounded: keep the most recent 400 tool calls' content arrays.
+    while (this.rawAssistant.size > 400) this.rawAssistant.delete(this.rawAssistant.keys().next().value as string);
 
     let text = texts.join("");
     let stopReason: ChatResponse["stopReason"];

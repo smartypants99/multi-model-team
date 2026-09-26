@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import { spawn, execFile, spawnSync, type ChildProcess } from "node:child_process";
 import type { CommandRequest, CommandResult } from "../core/types.js";
-import { wrapCommand, type IsolationSpec } from "./isolation.js";
+import { wrapCommand, POSIX_LIMITS_PREFIX, type IsolationSpec } from "./isolation.js";
 
 export interface RunOptions {
   rssLimitMb: number;
@@ -76,7 +76,8 @@ function spawnShell(command: string, cwd: string, env: Record<string, string>, i
       windowsVerbatimArguments: true,
     });
   }
-  const wrapped = isolation && isolation.kind !== "none" ? wrapCommand(isolation, command, cwd) : { file: "/bin/sh", args: ["-c", command] };
+  // Even without an OS sandbox, POSIX commands get the process/file-size limits.
+  const wrapped = isolation ? wrapCommand(isolation, command, cwd) : { file: "/bin/sh", args: ["-c", POSIX_LIMITS_PREFIX + command] };
   return spawn(wrapped.file, wrapped.args, {
     cwd,
     env,
