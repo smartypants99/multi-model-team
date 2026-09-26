@@ -1166,7 +1166,7 @@
     $("#replay-bar").hidden = isSettings || !replay.enabled;
     document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("is-active", (a.dataset.route === "settings") === isSettings));
     if (isSettings) loadSettings();
-    const m = /^#\/runs\/([^/]+)/.exec(hash);
+    const m = /^#\/runs?\/([^/]+)/.exec(hash);
     if (m && decodeURIComponent(m[1]) !== ui.currentRun && ui.runs.some((r) => r.id === decodeURIComponent(m[1]))) {
       $("#run-select").value = decodeURIComponent(m[1]);
       selectRun(decodeURIComponent(m[1]));
