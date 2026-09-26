@@ -74,8 +74,12 @@ npx vitest run tests/plugin-hook.test.ts
 The engine reads provider keys from the environment or from
 `~/.multi-model-team/.env` (see `docs/providers.md`). Claude Code never sees
 the keys: the slash command tells Claude Code to never print them, and the
-engine redacts them from every log line and dashboard payload. With no keys
-present, the command falls back to `--mock` and says so.
+engine redacts them from every log line and dashboard payload.
+
+The lead does not need an Anthropic API key: if none is set, the engine uses
+the logged-in Claude Code CLI (`claude -p`) as the lead, billed to the
+subscription. Other team members still need their providers' keys. With no
+usable providers at all, the command falls back to `--mock` and says so.
 
 ## How the slash command drives the engine
 

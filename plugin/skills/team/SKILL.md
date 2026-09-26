@@ -54,6 +54,11 @@ Decide the mode:
   reports no usable providers. Say so: mock runs use canned model replies and
   cost nothing.
 - Otherwise run for real. Never print, echo or paste API keys, even partially.
+- No Anthropic API key is needed for the lead: when none is set, the engine
+  drives the locally installed, logged-in Claude Code (`claude -p`) as the
+  lead on the user's subscription. At least one other provider key (OpenAI,
+  xAI, Z.AI, Moonshot) is still needed for a real multi-model team; with only
+  Claude available, tell the user and offer `--mock`.
 
 ## Step 3: start the run (detached)
 
