@@ -506,6 +506,10 @@ services on 2026-09-26:
   $0.41 (tiny library, red team found real gaps, v2 crowned) and $0.30
   (web app with screenshots).
 
+- Strict classification on a Linux host without bwrap (the user's server):
+  the suite passes with the OS-sandbox enforcement test skipped, the mock
+  demo completes with no confirmation prompts, and `mmt doctor` reports
+  "OS sandbox: none" with the reason.
 - The Claude Code plugin itself: `claude -p --plugin-dir .` with the
   `/multi-model-team:team` skill started a detached mock run, polled it with
   `wait`, and summarised outputs, logs, cost and the remaining dissent in four
