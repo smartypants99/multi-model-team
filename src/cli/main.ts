@@ -185,7 +185,7 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   }
   const result = await live.promise;
   if (!isChild) {
-    process.stdout.write(`\n${result.status === "ok" ? "✔" : "✖"} run ${result.status}${result.error ? `: ${result.error}` : ""}\ncost: $${result.totalCostUsd.toFixed(4)}\noutputs: ${Object.values(result.outputs).join(", ") || "(none)"}\nlogs: ${result.outDir}\n`);
+    process.stdout.write(`\n${result.status === "ok" ? "✔" : "✖"} run ${result.status}${result.error ? `: ${result.error}` : ""}\ncost: $${result.totalCostUsd.toFixed(4)}${mock ? " (mock provider: simulated, nothing was billed)" : ""}\noutputs: ${Object.values(result.outputs).join(", ") || "(none)"}\nlogs: ${result.outDir}\n`);
     await server?.stop();
     return result.status === "ok" ? 0 : 1;
   }

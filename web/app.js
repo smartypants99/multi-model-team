@@ -301,7 +301,8 @@
     badge.textContent = stage ? (s.paused ? `${stage} (paused)` : stage) : "no run";
     badge.className = "stage-badge" + (stage === "done" ? " is-done" : stage === "failed" ? " is-failed" : stage ? " is-active" : "");
     const c = s.cost;
-    $("#total-usd").textContent = fmtUsd(c?.totalUsd || 0);
+    $("#total-usd").textContent = fmtUsd(c?.totalUsd || 0) + (s.mock ? " (simulated)" : "");
+    $("#total-usd").title = s.mock ? "Mock provider: costs are simulated, nothing was billed" : "Live cost so far";
     const tk = c?.totalTokens || {};
     const tot = (tk.input || 0) + (tk.output || 0) + (tk.reasoning || 0);
     $("#total-tokens").textContent = c ? `${fmtNum(tot)} tokens (${fmtNum(tk.input || 0)} in / ${fmtNum(tk.output || 0)} out${tk.reasoning ? ` / ${fmtNum(tk.reasoning)} reasoning` : ""})` : "0 tokens";

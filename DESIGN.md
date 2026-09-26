@@ -452,6 +452,11 @@ services on 2026-09-26:
   $0.41 (tiny library, red team found real gaps, v2 crowned) and $0.30
   (web app with screenshots).
 
+- The Claude Code plugin itself: `claude -p --plugin-dir .` with the
+  `/multi-model-team:team` skill started a detached mock run, polled it with
+  `wait`, and summarised outputs, logs, cost and the remaining dissent in four
+  turns.
+
 OpenAI, xAI and Moonshot adapters are covered by stubbed-fetch unit tests
 only; the first live run with those keys is the true test of their wire
 formats.
