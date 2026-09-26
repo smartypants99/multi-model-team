@@ -1,0 +1,20 @@
+{
+  "name": "multi-model-team",
+  "owner": {
+    "name": "multi-model-team contributors"
+  },
+  "metadata": {
+    "description": "Marketplace for the multi-model-team plugin. The repository is both the marketplace and the plugin.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "multi-model-team",
+      "source": "./",
+      "description": "Frontier models from different providers verify, debate, red-team and improve Claude Code's work. Adds /multi-model-team:team and a sandbox-guard hook.",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": ["multi-model", "debate", "verification", "sandbox"]
+    }
+  ]
+}

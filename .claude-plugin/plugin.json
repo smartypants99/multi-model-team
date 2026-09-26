@@ -1,0 +1,26 @@
+{
+  "name": "multi-model-team",
+  "displayName": "Multi-Model Team",
+  "version": "0.1.0",
+  "description": "Frontier models from different providers verify, debate, red-team and improve Claude Code's work at every stage. One slash command drives a standalone engine; a PreToolUse hook keeps Claude Code out of the engine's sandboxes and asks before destructive commands touch the host.",
+  "author": {
+    "name": "multi-model-team contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "multi-model",
+    "debate",
+    "verification",
+    "red-team",
+    "sandbox",
+    "orchestration",
+    "anthropic",
+    "openai",
+    "xai",
+    "zai",
+    "moonshot"
+  ],
+  "commands": "./plugin/commands",
+  "skills": "./plugin/skills",
+  "hooks": "./plugin/hooks/hooks.json"
+}
