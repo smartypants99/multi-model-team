@@ -1,0 +1,30 @@
+{
+  "name": "researcher",
+  "displayName": "Researcher",
+  "description": "Answers a question by searching, reading sources and producing a cited, source-checked document. Every claim must cite a source; conflicting sources are flagged rather than smoothed over.",
+  "prompts": {
+    "do": "prompts/do.md",
+    "verify": "prompts/verify.md",
+    "discuss": "prompts/discuss.md",
+    "specialist": "prompts/specialist.md",
+    "meeting": "prompts/meeting.md"
+  },
+  "tools": ["web_search", "fetch_url", "read_notes", "write_notes"],
+  "verifier": { "prefer": "research", "fallback": ["rubric"] },
+  "redTeam": false,
+  "scoring": {
+    "type": "rubric",
+    "criteria": [
+      "every claim cites a source",
+      "no unsupported claims",
+      "conflicting sources flagged",
+      "coverage of the question",
+      "recency of sources"
+    ]
+  },
+  "workspace": "document",
+  "settings": {
+    "minSourcesPerKeyClaim": 2,
+    "preferPrimarySources": true
+  }
+}

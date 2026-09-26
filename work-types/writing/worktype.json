@@ -1,0 +1,20 @@
+{
+  "name": "writing",
+  "displayName": "Writing",
+  "description": "Produces a finished piece of prose (article, guide, email, report section, documentation) for a stated audience. Judged on accuracy, structure, clarity, audience fit and completeness.",
+  "prompts": {
+    "do": "prompts/do.md",
+    "verify": "prompts/verify.md",
+    "discuss": "prompts/discuss.md",
+    "specialist": "prompts/specialist.md",
+    "meeting": "prompts/meeting.md"
+  },
+  "tools": ["web_search", "fetch_url", "read_notes", "write_notes"],
+  "verifier": { "prefer": "rubric", "fallback": [] },
+  "redTeam": false,
+  "scoring": {
+    "type": "rubric",
+    "criteria": ["accuracy", "structure", "clarity", "audience fit", "completeness"]
+  },
+  "workspace": "document"
+}

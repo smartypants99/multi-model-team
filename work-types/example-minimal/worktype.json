@@ -1,0 +1,17 @@
+{
+  "name": "example-minimal",
+  "displayName": "Example (minimal)",
+  "description": "The smallest valid work type. Used by the test-suite and as a template: copy this folder to start a new work type.",
+  "prompts": {
+    "do": "prompts/do.md",
+    "verify": "prompts/verify.md",
+    "discuss": "prompts/discuss.md",
+    "specialist": "prompts/specialist.md",
+    "meeting": "prompts/meeting.md"
+  },
+  "tools": ["read_notes", "write_notes"],
+  "verifier": { "prefer": "rubric", "fallback": [] },
+  "redTeam": false,
+  "scoring": { "type": "none" },
+  "workspace": "document"
+}

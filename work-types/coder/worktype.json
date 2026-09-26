@@ -1,0 +1,32 @@
+{
+  "name": "coder",
+  "displayName": "Coder",
+  "description": "Implements software in an isolated sandbox with tests. Verified by running the tests, red-teamed by every other model, and checked by a vision verifier (for apps with a visible UI) or an execution verifier (for everything else).",
+  "prompts": {
+    "do": "prompts/do.md",
+    "verify": "prompts/verify.md",
+    "discuss": "prompts/discuss.md",
+    "redTeam": "prompts/redteam.md",
+    "specialist": "prompts/specialist.md",
+    "meeting": "prompts/meeting.md"
+  },
+  "tools": [
+    "read_file",
+    "write_file",
+    "list_files",
+    "delete_file",
+    "run_command",
+    "read_other_sandbox",
+    "web_search",
+    "fetch_url"
+  ],
+  "verifier": { "prefer": "vision", "fallback": ["execution", "rubric"] },
+  "redTeam": true,
+  "scoring": { "type": "tests", "command": "auto" },
+  "workspace": "sandbox",
+  "settings": {
+    "visualIfOutputIs": ["game", "ui", "website", "app", "frontend"],
+    "screenshotTool": "screenshot",
+    "requireTests": true
+  }
+}

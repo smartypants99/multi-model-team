@@ -1,0 +1,26 @@
+{
+  "name": "planning",
+  "displayName": "Planning",
+  "description": "Produces a decision-ready plan: goal, stated assumptions, options considered, risks with mitigations, ordered actionable steps and measurable outcomes.",
+  "prompts": {
+    "do": "prompts/do.md",
+    "verify": "prompts/verify.md",
+    "discuss": "prompts/discuss.md",
+    "specialist": "prompts/specialist.md",
+    "meeting": "prompts/meeting.md"
+  },
+  "tools": ["web_search", "fetch_url", "read_notes", "write_notes"],
+  "verifier": { "prefer": "rubric", "fallback": [] },
+  "redTeam": false,
+  "scoring": {
+    "type": "rubric",
+    "criteria": [
+      "assumptions stated",
+      "risks identified",
+      "alternatives considered",
+      "actionable steps",
+      "measurable outcomes"
+    ]
+  },
+  "workspace": "document"
+}
