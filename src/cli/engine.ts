@@ -109,7 +109,7 @@ export class Engine implements DashboardController {
   listRuns(): RunSummary[] {
     const out: RunSummary[] = [];
     for (const r of this.runs.values()) out.push({ id: r.runId, startedAt: r.startedAt, live: r.status === "running" || r.status === "paused", request: r.request, status: r.status, outputDir: r.outDir });
-    for (const d of listRunsOnDisk(this.runsRoot)) if (!this.runs.has(d.id)) out.push({ id: d.id, startedAt: d.startedAt ?? "", live: false, request: d.request, status: (d.status as any) ?? "ok", outputDir: d.dir });
+    for (const d of listRunsOnDisk(this.runsRoot)) if (!this.runs.has(d.id)) out.push({ id: d.id, startedAt: d.startedAt ?? "", live: false, request: d.request, status: this.settleStatus(d.id, d.status), outputDir: d.dir });
     // Runs logged elsewhere (e.g. --out demo-run) are known via control files.
     for (const f of fs.existsSync(this.controlDir()) ? fs.readdirSync(this.controlDir()) : []) {
       const id = f.replace(/\.json$/, "");
@@ -118,7 +118,7 @@ export class Engine implements DashboardController {
         const c = JSON.parse(fs.readFileSync(path.join(this.controlDir(), f), "utf8"));
         if (c.outDir && fs.existsSync(path.join(c.outDir, "events.jsonl"))) {
           const rj = fs.existsSync(path.join(c.outDir, "run.json")) ? JSON.parse(fs.readFileSync(path.join(c.outDir, "run.json"), "utf8")) : {};
-          out.push({ id, startedAt: c.startedAt ?? rj.startedAt ?? "", live: false, request: rj.request, status: rj.status ?? "ok", outputDir: c.outDir });
+          out.push({ id, startedAt: c.startedAt ?? rj.startedAt ?? "", live: false, request: rj.request, status: this.settleStatus(id, rj.status), outputDir: c.outDir });
         }
       } catch {
         /* ignore */
@@ -128,6 +128,21 @@ export class Engine implements DashboardController {
   }
   status(runId: string): Record<string, unknown> {
     return statusFromEvents(runId, this.readEvents(runId), this.runDir(runId));
+  }
+  /** A run recorded as "running" whose process is gone was interrupted (killed, crashed, machine restarted). */
+  private settleStatus(runId: string, recorded: string | undefined): RunSummary["status"] {
+    if (recorded !== "running" && recorded !== "paused") return (recorded as RunSummary["status"]) ?? "ok";
+    const c = this.readControlFile(runId);
+    const pid = Number(c?.pid);
+    if (pid && pid !== process.pid) {
+      try {
+        process.kill(pid, 0);
+        return recorded as RunSummary["status"]; // still alive in another process
+      } catch {
+        /* gone */
+      }
+    }
+    return "interrupted";
   }
   runDir(runId: string): string | undefined {
     const live = this.runs.get(runId);

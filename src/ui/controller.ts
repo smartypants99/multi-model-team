@@ -14,7 +14,7 @@ export interface RunSummary {
   /** True while the run is in progress (events come from the live bus). */
   live: boolean;
   request?: string;
-  status?: "running" | "paused" | "ok" | "stopped" | "failed";
+  status?: "running" | "paused" | "ok" | "stopped" | "failed" | "interrupted";
   /** Absolute log directory of the run (used by the engine; never exposed raw to the browser). */
   outputDir?: string;
 }
