@@ -83,7 +83,7 @@ export interface RetryOptions {
 /** Retry with exponential backoff + jitter for retryable ProviderErrors. */
 export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions): Promise<T> {
   const base = opts.baseDelayMs ?? 1000;
-  const max = opts.maxDelayMs ?? 30_000;
+  const max = opts.maxDelayMs ?? 60_000;
   let attempt = 0;
   for (;;) {
     try {
@@ -91,9 +91,11 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions): Pr
     } catch (e) {
       const err = e instanceof ProviderError ? e : new ProviderError(String((e as Error)?.message ?? e), "unknown");
       const retryable = err.kind === "rate_limit" || err.kind === "overloaded" || err.kind === "timeout" || err.kind === "network";
-      if (!retryable || attempt >= opts.retries || opts.signal?.aborted) throw err;
+      // A network outage deserves more patience than a bad reply: double the attempts and start the backoff higher.
+      const budget = err.kind === "network" || err.kind === "overloaded" ? opts.retries * 2 : opts.retries;
+      if (!retryable || attempt >= budget || opts.signal?.aborted) throw err;
       attempt++;
-      const backoff = Math.min(max, base * 2 ** (attempt - 1));
+      const backoff = Math.min(max, (err.kind === "network" ? base * 3 : base) * 2 ** (attempt - 1));
       const delay = Math.max(err.retryAfterMs ?? 0, backoff * (0.5 + Math.random()));
       opts.onRetry?.(err, attempt, delay);
       await sleep(delay, opts.signal);
