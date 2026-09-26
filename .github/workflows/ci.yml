@@ -45,7 +45,7 @@ jobs:
         run: npm run demo
 
       - name: Verify demo output
-        run: node scripts/check-demo.mjs demo-run
+        run: node scripts/check-demo.mjs runs/demo
 
       - name: Scan for secrets and personal details
         run: npm run scan-secrets

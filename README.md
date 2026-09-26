@@ -172,7 +172,9 @@ node dist/cli/main.js --help
 npm run demo
 ```
 
-This writes the example run into `demo-run/`. A committed copy of that run is included in the repository so you can browse the logs and replay it in the dashboard before adding any keys.
+This writes the run into `runs/demo/` (git-ignored). A committed copy of the same run lives in `demo-run/` so you can browse the logs and replay it in the dashboard before adding any keys (`npm run demo:refresh` regenerates it).
+
+**Check your setup** at any time with `npm run doctor`: it reports Node and git versions, detected providers and models, whether Claude Code is logged in, whether Playwright is available for screenshots, and the host resources the guard will use.
 
 ## The dashboard
 

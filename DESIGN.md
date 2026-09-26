@@ -362,7 +362,10 @@ independent.
   and returns `permissionDecision: "ask"` for anything outside the run's
   sandboxes.
 - **Resource guard.** The engine detects RAM, free disk, cores, GPU/VRAM and
-  Apple unified memory. Heavy commands (install/build/train/… patterns) must
+  Apple unified memory. "Free RAM" means memory a new process can actually
+  claim: reclaimable pages from `vm_stat` on macOS and `MemAvailable` on
+  Linux, because `os.freemem()` undercounts by an order of magnitude on macOS
+  and would make the guard kill ordinary builds. Heavy commands (install/build/train/… patterns) must
   carry an estimate; all live members vote on it; the engine independently
   blocks anything above `maxResourceFraction` (default 60 %) of free RAM/disk
   and kills any process tree whose RSS exceeds the limit. Every command has

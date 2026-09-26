@@ -27,7 +27,7 @@ export function resetHostResourcesCache(): void {
 async function detectUncached(): Promise<HostResources> {
   const platform = process.platform;
   const totalRamMb = Math.floor(os.totalmem() / MB);
-  const freeRamMb = Math.floor(os.freemem() / MB);
+  const freeRamMb = await detectAvailableRamMb();
   const cpuCores = detectCpuCores();
   const unifiedMemory = isAppleSilicon();
   const freeDiskMb = await detectFreeDiskMb();
@@ -153,4 +153,32 @@ export function parseSizeToMb(text: string | undefined): number | undefined {
   if (unit.startsWith("G")) return Math.round(n * 1024);
   if (unit.startsWith("K")) return Math.round(n / 1024);
   return Math.round(n);
+}
+
+/**
+ * RAM a new process could actually use. os.freemem() undercounts badly on
+ * macOS (only "free" pages; inactive/speculative/purgeable pages are
+ * reclaimable) and on some Linux builds (free vs MemAvailable), which would
+ * make the resource guard kill ordinary builds. Falls back to os.freemem().
+ */
+export async function detectAvailableRamMb(): Promise<number> {
+  const fallback = Math.floor(os.freemem() / MB);
+  try {
+    if (process.platform === "darwin") {
+      const out = (await run("vm_stat", [], 3000)) ?? "";
+      const pageSize = Number(/page size of (\d+) bytes/.exec(out)?.[1] ?? 16384);
+      const pages = (name: string) => Number(new RegExp(`Pages ${name}:\\s+(\\d+)`).exec(out)?.[1] ?? 0);
+      const reclaimable = pages("free") + pages("inactive") + pages("speculative") + pages("purgeable");
+      const mb = Math.floor((reclaimable * pageSize) / MB);
+      return mb > 0 ? Math.max(mb, fallback) : fallback;
+    }
+    if (process.platform === "linux") {
+      const meminfo = fs.readFileSync("/proc/meminfo", "utf8");
+      const kb = Number(/MemAvailable:\s+(\d+) kB/.exec(meminfo)?.[1] ?? 0);
+      return kb > 0 ? Math.max(Math.floor(kb / 1024), fallback) : fallback;
+    }
+  } catch {
+    /* fall through */
+  }
+  return fallback;
 }

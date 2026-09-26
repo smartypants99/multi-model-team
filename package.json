@@ -15,7 +15,9 @@
     "dev": "tsx src/cli/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo": "node dist/cli/main.js run --mock --request \"research the top pen brands and make a game with better pens being bosses\" --out demo-run --no-ui --yes",
+    "demo": "node dist/cli/main.js run --mock --request \"research the top pen brands and make a game with better pens being bosses\" --out runs/demo --no-ui --yes",
+    "demo:refresh": "node dist/cli/main.js run --mock --request \"research the top pen brands and make a game with better pens being bosses\" --out demo-run --no-ui --yes",
+    "doctor": "node dist/cli/main.js doctor",
     "scan-secrets": "node scripts/scan-secrets.mjs",
     "lint": "tsc -p tsconfig.json --noEmit"
   },

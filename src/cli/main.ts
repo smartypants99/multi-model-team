@@ -57,6 +57,7 @@ Commands:
   settings                  show the saved model profile
   runs                      list runs
   serve [--port N]          start the dashboard alone (replay past runs, edit settings)
+  doctor                    check Node, git, keys/providers, Claude Code login, Playwright, host resources
 `;
 
 async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -97,6 +98,8 @@ async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     case "serve":
       return cmdServe(loaded, args, mock);
+    case "doctor":
+      return cmdDoctor(loaded, mock);
     default:
       process.stderr.write(`unknown command: ${cmd}\n${HELP}`);
       return 2;
@@ -303,6 +306,45 @@ async function cmdProviders(loaded: ReturnType<typeof loadConfig>, args: Args, m
     }
   }
   return 0;
+}
+
+async function cmdDoctor(loaded: ReturnType<typeof loadConfig>, mock: boolean): Promise<number> {
+  const { spawnSync } = await import("node:child_process");
+  const { detectHostResources } = await import("../sandbox/resources.js");
+  const { formatHost } = await import("../sandbox/guard.js");
+  const { playwrightAvailable } = await import("../tools/screenshot.js");
+  const { detectProviders } = await import("../providers/discovery.js");
+  const ok = (b: boolean) => (b ? "ok  " : "MISSING");
+  const ver = (cmd: string, args: string[]) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8", windowsHide: true });
+    return r.status === 0 ? String(r.stdout || r.stderr).trim().split("\n")[0] : undefined;
+  };
+  let problems = 0;
+  const line = (good: boolean, label: string, detail: string) => {
+    if (!good) problems++;
+    process.stdout.write(`${ok(good)}  ${label.padEnd(18)} ${detail}\n`);
+  };
+  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  line(nodeMajor >= 20, "node", `${process.version}${nodeMajor < 20 ? " (need 20+)" : ""}`);
+  const git = ver("git", ["--version"]);
+  line(!!git, "git", git ?? "not found on PATH (needed for diffs)");
+  const claude = ver("claude", ["--version"]);
+  line(true, "claude code", claude ? `${claude} (used as lead when no ANTHROPIC_API_KEY is set)` : "not found (optional; set ANTHROPIC_API_KEY instead)");
+  line(true, "playwright", (await playwrightAvailable()) ? "available (visual verification with screenshots)" : "not installed (optional: npm i -D playwright && npx playwright install chromium)");
+  line(true, "config", `home ${loaded.config.homeDir}; sources: ${loaded.sources.join(", ")}`);
+  line(true, "cost cap", loaded.config.cost.capUsd === null ? "none (set cost.capUsd or MMT_COST_CAP_USD)" : `$${loaded.config.cost.capUsd}`);
+  const host = await detectHostResources();
+  line(true, "host", formatHost(host));
+  process.stdout.write("\nProviders (probing endpoints, may take a moment)...\n");
+  const r = await detectProviders({ config: loaded.config, env: loaded.env, mock });
+  for (const n of r.notes) process.stdout.write(`note  ${n}\n`);
+  const hasLead = r.providers.some((p) => p.providerId === (mock ? "mock" : "anthropic"));
+  const others = r.providers.filter((p) => p.providerId !== "anthropic");
+  for (const p of r.providers) line(true, p.endpointId, `${p.models.length} models via ${p.keySource}`);
+  line(hasLead, "lead", hasLead ? "Anthropic lead available" : "no Anthropic API key and no Claude Code login");
+  line(others.length > 0 || mock, "team", others.length ? `${others.length} other provider endpoint(s)` : "no other provider keys: add at least one (OPENAI_API_KEY, XAI_API_KEY, ZAI_API_KEY, MOONSHOT_API_KEY) for a real multi-model team");
+  process.stdout.write(problems ? `\n${problems} problem(s) found.\n` : "\nReady.\n");
+  return problems ? 1 : 0;
 }
 
 async function cmdServe(loaded: ReturnType<typeof loadConfig>, args: Args, mock: boolean): Promise<number> {
