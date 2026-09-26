@@ -234,7 +234,9 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
     /** The lead's auto model pick: asks the lead itself, falls back to the heuristic. */
     async function leadAutoPick(providerName: string, models: ModelInfo[], task: string) {
       const adapter = detected.adapters.get(detected.providers.find((p) => p.providerId === leadProviderId)!.endpointId)!;
-      const leadModel = profile?.lead.modelId ?? detected.providers.find((p) => p.providerId === leadProviderId)!.models[0]?.modelId;
+      // The selection call itself is cheap work: use the saved lead, else a mid-tier model rather than the flagship.
+      const leadModels = detected.providers.find((p) => p.providerId === leadProviderId)!.models;
+      const leadModel = profile?.lead.modelId ?? (leadModels.find((m) => /sonnet/i.test(m.modelId)) ?? leadModels.find((m) => /mock-lead/.test(m.modelId)) ?? leadModels[0])?.modelId;
       if (!leadModel) return undefined;
       try {
         const res = await adapter.chat({ model: leadModel, system: P.selectModelPrompt("the lead", providerName, models, task), messages: [textMessage("user", "Pick now.")], reasoning: "low", maxTokens: 400, timeoutMs: 60_000, tag: "select" });

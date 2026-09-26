@@ -127,7 +127,8 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
     return 2;
   }
   const outDir = typeof args.flags.out === "string" ? path.resolve(args.flags.out) : undefined;
-  const overrides = parseModelOverrides(Array.isArray(args.flags.model) ? args.flags.model : []);
+  // parseModelOverrides expects raw "--model <spec>" tokens.
+  const overrides = parseModelOverrides(Array.isArray(args.flags.model) ? args.flags.model.flatMap((m) => ["--model", m]) : []);
   const engine = new Engine(loaded, mock);
 
   if (args.flags.detach) {
