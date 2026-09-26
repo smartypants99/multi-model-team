@@ -248,6 +248,8 @@ export class DashboardServer {
 
   private async runFile(runId: string, rel: string, res: http.ServerResponse): Promise<void> {
     if (!rel || rel.includes("\0")) throw new HttpError(400, "path is required");
+    // Logged paths are aliased ("<run>/screenshots/x.png"); resolve them inside the run folder.
+    rel = rel.replace(/^<run>[\\/]/, "");
     const custom = this.opts.controller.runDir ? await this.opts.controller.runDir(runId) : undefined;
     const runDir = custom ?? path.join(this.runsRoot, runId);
     const target = await this.jail(runDir, rel);

@@ -631,7 +631,9 @@ export class RunLogger {
     let shot = "";
     if (d.screenshotPath) {
       const src = str(d.screenshotPath);
-      const rel = this.relativeInsideRun(src);
+      // The redactor aliases the run folder to "<run>" before events reach the logger.
+      const aliased = /^<run>[\\/]/.test(src) ? src.slice(6).replace(/\\/g, "/") : undefined;
+      const rel = aliased ?? this.relativeInsideRun(src);
       if (rel) {
         shot = `\n\n![screenshot](${toPosix(path.relative(this.taskDir(taskId), path.join(this.runDir, rel)))})`;
       } else if (fs.existsSync(src)) {

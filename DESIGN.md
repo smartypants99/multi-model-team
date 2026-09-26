@@ -445,7 +445,12 @@ services on 2026-09-26:
   `claude-sonnet-5` and `claude-haiku-4-5`, including the tool loop, cost
   pass-through and JSON replies.
 - The real Playwright screenshot path (served sandbox, module scripts, image
-  attachment to the next message).
+  attachment to the next message), and a full live coding run with a vision
+  verifier: `glm-5.3-flash` served the app, captured "initial" and
+  "after-3-clicks" screenshots with click actions, inspected them and
+  reported the rendered count. Two-member live runs cost $0.12 (haiku),
+  $0.41 (tiny library, red team found real gaps, v2 crowned) and $0.30
+  (web app with screenshots).
 
 OpenAI, xAI and Moonshot adapters are covered by stubbed-fetch unit tests
 only; the first live run with those keys is the true test of their wire

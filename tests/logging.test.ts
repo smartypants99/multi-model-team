@@ -267,3 +267,26 @@ describe("replay", () => {
     expect(listRuns(path.join(root, "nowhere"))).toEqual([]);
   });
 });
+
+describe("aliased screenshot paths", () => {
+  it("links screenshots whose path was aliased to <run>/ by the redactor", async () => {
+    const fsMod = await import("node:fs");
+    const pathMod = await import("node:path");
+    const osMod = await import("node:os");
+    const { RunLogger } = await import("../src/logging/run-logger.js");
+    const { Redactor } = await import("../src/logging/redact.js");
+    const { EventBus } = await import("../src/core/events.js");
+    const dir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), "mmt-shot-"));
+    fsMod.mkdirSync(pathMod.join(dir, "screenshots"));
+    fsMod.writeFileSync(pathMod.join(dir, "screenshots", "a.png"), "png");
+    const red = new Redactor([]);
+    red.addPathAlias(dir, "<run>");
+    const bus = new EventBus("r");
+    new RunLogger(dir, red).attach(bus);
+    bus.emit("run.started", { request: "x" });
+    bus.emit("specialist.action", { taskId: "t1", memberId: "m1", action: "screenshot", detail: "shot", screenshotPath: pathMod.join(dir, "screenshots", "a.png") }, { taskId: "t1" });
+    const md = fsMod.readFileSync(pathMod.join(dir, "tasks", "t1", "specialist.md"), "utf8");
+    expect(md).toContain("![screenshot](../../screenshots/a.png)");
+    expect(md).not.toContain("file not found");
+  });
+});
