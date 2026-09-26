@@ -113,3 +113,49 @@ these it supports (`ReasoningControl`); the UI/CLI offer only those.
 - Images: base64 data URLs only.
 - Pricing ($/M): kimi-k3 3/15, kimi-k2.7-code 0.95/4, kimi-k2.7-code-highspeed 1.9/8, kimi-k2.6 0.95/4.
 - Errors `{error:{type,message}}`; 429 carries `X-RateLimit-*` headers.
+
+## Anthropic — Claude Code CLI (subscription login, no API key)
+
+Endpoint `claude-code` (protocol `claude-cli`, base URL `cli://claude`). Used
+as the Anthropic lead when no `ANTHROPIC_API_KEY` is set and the `claude`
+binary is on PATH (force it next to a key with `MMT_USE_CLAUDE_CLI=1`).
+Verified with Claude Code 2.1.283 on 2026-09-26.
+
+- One process per call: `claude -p --no-session-persistence --output-format json
+  --strict-mcp-config --model <id> --effort <level> --tools "" --system-prompt <system>
+  [--mcp-config <tmp.json> --allowedTools mcp__mmt --max-turns <maxToolIterations+2>]`
+  with the flattened conversation on **stdin** (a positional prompt is swallowed
+  by the variadic `--allowedTools`; stdin took a 160 KB prompt without issue).
+  `--bare` is never used: it disables the OAuth login this transport relies on.
+- Result JSON: `result` (final text), `is_error`, `total_cost_usd`,
+  `usage {input_tokens (uncached), output_tokens, cache_read_input_tokens,
+  cache_creation_input_tokens, output_tokens_details.thinking_tokens}`,
+  `modelUsage` (keyed by model id), `stop_reason`, `num_turns`, `api_error_status`.
+  The engine reports `inputTokens` as uncached + cache read + cache write.
+- Cost: `total_cost_usd` is passed through as `ChatResponse.costUsd` and the
+  cost tracker uses it instead of the price table (a subscription is billed
+  differently, but the CLI's figure is the best available estimate).
+- Tools: the engine's tools are served by a local MCP server (127.0.0.1,
+  random port, bearer token per call, `Authorization` header in a 0600 temp
+  config). `--tools ""` removes the built-in tools but keeps MCP tools;
+  `--allowedTools mcp__mmt` pre-approves the whole server so no permission
+  mode flag is needed in `-p` mode; `--strict-mcp-config` keeps the user's own
+  MCP servers out. The CLI runs the tool loop itself; each call still emits
+  `tool.call` events through the engine's executor.
+- Reasoning: `--effort low|medium|high|xhigh|max`; an unknown value is
+  ignored with a warning, so levels are clamped first. `none` → `low`.
+  Haiku 4.5 accepted `--effort max` (thinking tokens reported), so every
+  listed model advertises all five levels.
+- Models: no models endpoint without a key, so the list is the static table
+  `config.providers.claudeCliModels` (fable-5-1, opus-5-5, sonnet-5,
+  haiku-4-5; vision, tools, 1M context / Haiku 200K). Pricing comes from
+  `config.pricing`. Thinking text is not returned (`returnsReasoningText: false`).
+- Errors: `is_error: true` with the message in `result`; login problems →
+  `auth`, 429 → `rate_limit`, 529 → `overloaded`, 400/404 → `bad_request`.
+  Probe = `claude --version` plus one tiny Haiku call (about $0.005), cached per
+  process; `MMT_CLAUDE_CLI_PROBE=off` skips the paid part.
+- Limits: images in the conversation are replaced by a placeholder (the CLI
+  cannot take image bytes on stdin); the child process never sees
+  `ANTHROPIC_API_KEY`; each call is a fresh session, so prompt caching across
+  calls is up to the CLI.
+

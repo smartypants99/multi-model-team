@@ -33,6 +33,8 @@ export interface LlmDeps {
 }
 
 export interface CallOptions {
+  /** Internal: answer without further tool loops (tool budget exhausted / JSON retry). Tools stay declared so providers accept the history. */
+  finalOnly?: boolean;
   member: TeamMember;
   stage: Stage;
   taskId?: string;
@@ -47,6 +49,7 @@ export interface CallOptions {
 
 export interface CallResult {
   text: string;
+  stopReason: ChatResponse["stopReason"];
   reasoningText?: string;
   usage: TokenUsage;
   costUsd: number;
@@ -57,7 +60,8 @@ export interface CallResult {
 
 export class MemberFailedError extends Error {
   constructor(public readonly member: TeamMember, public readonly cause: unknown) {
-    super(`${member.label} (${member.modelId}) failed: ${(cause as Error)?.message ?? cause}`);
+    // No model id in the message: this text can reach other models' prompts. The member object carries the id for logs.
+    super(`${member.label} failed: ${(cause as Error)?.message ?? cause}`);
     this.name = "MemberFailedError";
   }
 }
@@ -92,6 +96,35 @@ export class Llm {
         signal: opts.signal,
         tag: opts.tag,
       };
+      if (tools.length) {
+        // Transports that run the tool loop themselves (claude-cli) execute tools through this
+        // callback; the same tool.call events are emitted as for the native loop below.
+        req.toolExecutors = {
+          execute: async (name, args) => {
+            toolCallsMade++;
+            const tool = tools.find((t) => t.schema.name === name);
+            let out: string;
+            let ok = true;
+            if (!tool) {
+              out = `error: unknown tool ${name}`;
+              ok = false;
+            } else if (!opts.toolCtx) {
+              out = "error: tools unavailable in this context";
+              ok = false;
+            } else {
+              try {
+                out = await tool.execute(args ?? {}, opts.toolCtx);
+              } catch (e: any) {
+                out = `error: ${e?.message ?? e}`;
+                ok = false;
+              }
+            }
+            if (out.length > 60_000) out = out.slice(0, 60_000) + "\n…[truncated]";
+            this.deps.bus.emit("tool.call", { memberId: member.id, tool: name, args, resultPreview: out.slice(0, 400), ok }, { stage: opts.stage, taskId: opts.taskId, memberId: member.id });
+            return { text: out, ok };
+          },
+        };
+      }
       let res: ChatResponse;
       try {
         res = await withRetry(() => adapter.chat(req), {
@@ -107,7 +140,7 @@ export class Llm {
         throw new MemberFailedError(member, e);
       }
       addUsage(total, res.usage);
-      const entry = this.deps.cost.record({ memberId: member.id, model: `${member.providerId}/${member.modelId}`, stage: opts.stage, taskId: opts.taskId, usage: res.usage });
+      const entry = this.deps.cost.record({ memberId: member.id, model: `${member.providerId}/${member.modelId}`, stage: opts.stage, taskId: opts.taskId, usage: res.usage, ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}) });
       cost += entry.costUsd;
       if (res.reasoningText) lastReasoning = res.reasoningText;
       this.deps.bus.emit(
@@ -116,8 +149,16 @@ export class Llm {
         { stage: opts.stage, taskId: opts.taskId, memberId: member.id },
       );
 
-      if (!res.toolCalls.length || !tools.length) {
-        return { text: res.text, reasoningText: lastReasoning, usage: total, costUsd: cost, toolCallsMade, messages, model: res.model };
+      if (!res.toolCalls.length || !tools.length || (opts.finalOnly && iter > 0)) {
+        return { text: res.text, stopReason: res.stopReason, reasoningText: lastReasoning, usage: total, costUsd: cost, toolCallsMade, messages, model: res.model };
+      }
+      if (opts.finalOnly) {
+        // The model still asked for tools: record the calls as refused and let it answer once more.
+        const assistantParts: ChatMessage["content"] = res.text ? [{ type: "text", text: res.text }] : [];
+        for (const tc of res.toolCalls) assistantParts.push({ type: "tool_call", id: tc.id, name: tc.name, arguments: tc.arguments });
+        messages.push({ role: "assistant", content: assistantParts, reasoningText: res.reasoningText });
+        messages.push({ role: "tool", content: res.toolCalls.map((tc) => ({ type: "tool_result" as const, toolCallId: tc.id, content: "error: tool budget exhausted; reply with your final JSON answer now", isError: true })) });
+        continue;
       }
 
       // Tool round-trip.
@@ -127,6 +168,7 @@ export class Llm {
       messages.push({ role: "assistant", content: assistantParts, reasoningText: res.reasoningText });
 
       const resultParts: ChatMessage["content"] = [];
+      const attachments: ChatMessage["content"] = [];
       for (const tc of res.toolCalls) {
         toolCallsMade++;
         const tool = tools.find((t) => t.schema.name === tc.name);
@@ -149,11 +191,18 @@ export class Llm {
         if (out.length > 60_000) out = out.slice(0, 60_000) + "\n…[truncated]";
         this.deps.bus.emit("tool.call", { memberId: member.id, tool: tc.name, args: tc.arguments, resultPreview: out.slice(0, 400), ok }, { stage: opts.stage, taskId: opts.taskId, memberId: member.id });
         resultParts.push({ type: "tool_result", toolCallId: tc.id, content: out, isError: !ok });
+        if (tool?.lastImages?.length) {
+          attachments.push(...tool.lastImages.splice(0));
+        }
       }
       messages.push({ role: "tool", content: resultParts });
+      if (attachments.length) {
+        // Images cannot travel inside tool results on every provider; a user message can carry them everywhere.
+        messages.push({ role: "user", content: [{ type: "text", text: `Attached: ${attachments.length} image(s) captured by your last tool call. Inspect them before answering.` }, ...attachments.splice(0)] });
+      }
     }
-    // Iteration cap hit: ask for a final answer without tools.
-    const final = await this.call({ ...opts, messages: [...messages, { role: "user", content: [{ type: "text", text: "Tool budget exhausted. Reply now with your final JSON answer and no further tool calls." }] }], tools: [] });
+    // Iteration cap hit: ask for a final answer. Tools stay declared (providers reject histories with tool blocks otherwise).
+    const final = await this.call({ ...opts, finalOnly: true, messages: [...messages, { role: "user", content: [{ type: "text", text: "Tool budget exhausted. Reply now with your final JSON answer and no further tool calls." }] }] });
     return { ...final, usage: addUsage(total, final.usage), costUsd: cost + final.costUsd, toolCallsMade: toolCallsMade + final.toolCallsMade };
   }
 
@@ -166,12 +215,13 @@ export class Llm {
     let parsed = parseJsonReply(result.text);
     let problem = parsed.ok ? validate?.(parsed.value) : parsed.error;
     if (problem) {
+      const truncated = result.stopReason === "max_tokens";
       const retryMessages: ChatMessage[] = [
         ...result.messages,
         { role: "assistant", content: [{ type: "text", text: result.text || "(empty)" }] },
-        { role: "user", content: [{ type: "text", text: `Your reply was not valid: ${problem}. Reply again with ONLY the JSON object described in your instructions, no prose, no code fences.` }] },
+        { role: "user", content: [{ type: "text", text: truncated ? "Your reply was cut off by the output limit. Reply again with ONLY the JSON object, more concisely." : `Your reply was not valid: ${problem}. Reply again with ONLY the JSON object described in your instructions, no prose, no code fences.` }] },
       ];
-      const second = await this.call({ ...opts, messages: retryMessages, tools: [] , tag: opts.tag + "/json-retry" });
+      const second = await this.call({ ...opts, finalOnly: true, messages: retryMessages, maxTokens: truncated ? Math.min((opts.maxTokens ?? this.deps.maxTokens) * 2, 64_000) : opts.maxTokens, tag: opts.tag + "/json-retry" });
       result = { ...second, usage: addUsage(result.usage, second.usage), costUsd: result.costUsd + second.costUsd, toolCallsMade: result.toolCallsMade + second.toolCallsMade, reasoningText: second.reasoningText ?? result.reasoningText };
       parsed = parseJsonReply(result.text);
       problem = parsed.ok ? validate?.(parsed.value) : parsed.error;

@@ -1,5 +1,17 @@
 import type { ProviderEndpoint, ReasoningLevel, ModelPricing } from "../core/types.js";
 
+/** One row of the static table used by the "claude-cli" transport. Pricing comes from `pricing` unless set here. */
+export interface ClaudeCliModel {
+  id: string;
+  displayName: string;
+  vision: boolean;
+  contextWindow: number;
+  maxOutputTokens?: number;
+  /** Effort levels accepted by `claude --effort` for this model. */
+  effortLevels: ReasoningLevel[];
+  pricing?: ModelPricing;
+}
+
 /** Everything the engine can be configured with. Loaded from config.json + config.local.json + .env. */
 export interface EngineConfig {
   /** Where runs, sandboxes, caches and the profile live. Defaults to ~/.multi-model-team. */
@@ -17,6 +29,8 @@ export interface EngineConfig {
     excludeModels: string[];
     /** Cheap model ids per provider family, used for probes and when a models endpoint is missing. */
     fallbackModels: Record<string, string[]>;
+    /** Static model table for the Claude Code CLI transport (no models endpoint is reachable without an API key). */
+    claudeCliModels: ClaudeCliModel[];
   };
   /** Price table keyed by "providerId/modelId" (regex allowed as the model part). */
   pricing: Record<string, ModelPricing>;

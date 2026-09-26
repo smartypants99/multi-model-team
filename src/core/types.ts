@@ -64,8 +64,8 @@ export interface ProviderEndpoint {
   providerId: string;
   displayName: string;
   baseUrl: string;
-  /** Wire protocol the endpoint speaks. */
-  protocol: "anthropic" | "openai-responses" | "openai-chat";
+  /** Wire protocol the endpoint speaks. "claude-cli" runs the local Claude Code CLI instead of HTTP. */
+  protocol: "anthropic" | "openai-responses" | "openai-chat" | "claude-cli";
   /** Environment variables that may hold a key for this endpoint (checked in order). */
   envKeys: string[];
 }
@@ -115,6 +115,16 @@ export interface ChatRequest {
   signal?: AbortSignal;
   /** Free-form tag for logs, e.g. "task-2/verify". */
   tag?: string;
+  /**
+   * Executes the tools in `tools` on the caller's behalf. Only transports that
+   * run the tool loop themselves (claude-cli) use it; HTTP adapters return
+   * `toolCalls` and let the engine execute them.
+   */
+  toolExecutors?: ToolExecutors;
+}
+
+export interface ToolExecutors {
+  execute(name: string, args: Record<string, unknown>): Promise<{ text: string; ok: boolean }>;
 }
 
 export interface TokenUsage {
@@ -137,6 +147,8 @@ export interface ChatResponse {
   nativeReasoning: Record<string, unknown>;
   raw?: unknown;
   latencyMs: number;
+  /** Cost reported by the provider itself (e.g. the Claude Code CLI); preferred over the price table when present. */
+  costUsd?: number;
 }
 
 export class ProviderError extends Error {
@@ -425,6 +437,8 @@ export interface ToolContext {
 export interface ToolDefinition {
   schema: ToolSchema;
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string>;
+  /** Images produced by the last execute() (e.g. screenshots); the tool loop attaches them to the next message and clears the list. */
+  lastImages?: ContentPart[];
 }
 
 // ---------------------------------------------------------------------------

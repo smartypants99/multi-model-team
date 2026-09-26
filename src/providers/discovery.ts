@@ -10,6 +10,7 @@ import type { EngineConfig } from "../config/schema.js";
 import { MockProvider } from "./mock.js";
 import { createAdapter } from "./registry.js";
 import { ModelCache, keyFingerprint } from "./cache.js";
+import { findClaudeBinary } from "./claude-cli.js";
 
 export interface DetectOptions {
   config: EngineConfig;
@@ -37,6 +38,8 @@ export interface DetectResult {
 }
 
 const EXTRA_KEY_PREFIX = "MMT_EXTRA_KEY_";
+/** keySource shown for the Claude Code CLI transport (no key is involved). */
+export const CLAUDE_LOGIN_SOURCE = "claude login";
 const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 const CAPABILITY_CONCURRENCY = 4;
 
@@ -81,12 +84,13 @@ export async function detectProviders(opts: DetectOptions): Promise<DetectResult
   }
 
   const cfg = opts.config;
-  const factory = opts.adapterFactory ?? ((endpoint, key) => createAdapter(endpoint, key, { timeoutMs: cfg.pipeline.callTimeoutMs, capabilityHints: cfg.capabilityHints, fallbackModels: cfg.providers.fallbackModels }));
+  const factory = opts.adapterFactory ?? ((endpoint, key) => createAdapter(endpoint, key, { timeoutMs: cfg.pipeline.callTimeoutMs, capabilityHints: cfg.capabilityHints, fallbackModels: cfg.providers.fallbackModels, claudeCliModels: cfg.providers.claudeCliModels, maxToolIterations: cfg.pipeline.maxToolIterations }));
   const endpoints = [...cfg.providers.endpoints, ...cfg.providers.extraCompatible];
   const candidates = collectCandidates(endpoints, cfg.providers.extraCompatible, opts.env);
+  candidates.push(...cliCandidates(endpoints, candidates, opts.env));
 
   if (candidates.length === 0) {
-    notes.push(`No API keys found. Set one of: ${uniqueEnvVars(endpoints).join(", ")} or MMT_EXTRA_KEY_<NAME>.`);
+    notes.push(`No API keys found. Set one of: ${uniqueEnvVars(endpoints).join(", ")} or MMT_EXTRA_KEY_<NAME>, or install and log in to Claude Code (\`claude\`) to use it as the lead.`);
     return { providers: [], adapters, notes };
   }
 
@@ -118,6 +122,10 @@ export async function detectProviders(opts: DetectOptions): Promise<DetectResult
   }
 
   for (const [envVar, tried] of triedFor) {
+    if (envVar === CLAUDE_LOGIN_SOURCE) {
+      if (!workedFor.has(envVar)) notes.push("Claude Code CLI was found but its probe failed (not logged in, or `claude -p` errored); run `claude` once to log in.");
+      continue;
+    }
     if (!workedFor.has(envVar)) {
       notes.push(`Key in ${envVar} did not work on any known endpoint (tried: ${[...tried].join(", ")}).`);
     }
@@ -133,7 +141,7 @@ export async function detectProviders(opts: DetectOptions): Promise<DetectResult
     adapters.set(endpoint.id, adapter);
     let models: ModelInfo[];
     try {
-      models = await discoverModels({ adapter, endpoint, key: candidate.key, cfg, cache, refresh: opts.refresh ?? false, log, notes });
+      models = await discoverModels({ adapter, endpoint, key: candidate.key || candidate.envVar, cfg, cache, refresh: opts.refresh ?? false, log, notes });
     } catch (e) {
       notes.push(`Could not list models for ${endpoint.id}: ${shortError(e)}`);
       models = [];
@@ -149,6 +157,24 @@ export async function detectProviders(opts: DetectOptions): Promise<DetectResult
   }
 
   return { providers, adapters, notes };
+}
+
+/**
+ * Keyless candidates for "claude-cli" endpoints. The CLI is probed only when
+ * no API key candidate exists for the same provider family (so a key stays
+ * preferred) or when MMT_USE_CLAUDE_CLI=1, and only when the binary is on PATH.
+ */
+export function cliCandidates(endpoints: ProviderEndpoint[], keyed: Candidate[], env: Record<string, string>): Candidate[] {
+  const out: Candidate[] = [];
+  for (const endpoint of endpoints) {
+    if (endpoint.protocol !== "claude-cli") continue;
+    const hasKey = keyed.some((c) => c.endpoint.providerId === endpoint.providerId && c.key);
+    if (hasKey && env.MMT_USE_CLAUDE_CLI !== "1") continue;
+    const name = endpoint.baseUrl.replace(/^cli:\/\//, "") || "claude";
+    if (!findClaudeBinary(env, name)) continue;
+    out.push({ endpoint, envVar: CLAUDE_LOGIN_SOURCE, key: "" });
+  }
+  return out;
 }
 
 /** Build the list of (endpoint, key) pairs to probe. Ordered by endpoint, then envKeys precedence. */

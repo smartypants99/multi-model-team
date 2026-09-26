@@ -23,7 +23,11 @@ export interface CostTotals {
   unpricedCalls: number;
 }
 
-export type CostRecordInput = Omit<CostEntry, "costUsd" | "ts" | "unpriced"> & { ts?: string };
+export type CostRecordInput = Omit<CostEntry, "costUsd" | "ts" | "unpriced"> & {
+  ts?: string;
+  /** Cost the provider reported for this call; when present it is used as-is instead of the price table. */
+  costUsd?: number;
+};
 
 interface PriceRule {
   providerId: string;
@@ -101,15 +105,16 @@ export class CostTracker {
    * pass `providerId` explicitly when the model string does not carry it.
    */
   record(entry: CostRecordInput & { providerId?: string }): CostEntry {
-    const { providerId: explicitProvider, ...rest } = entry;
+    const { providerId: explicitProvider, costUsd: reported, ...rest } = entry;
     const { providerId, modelId } = splitModel(rest.model, explicitProvider);
     const pricing = this.price(providerId, modelId);
+    const hasReported = typeof reported === "number" && Number.isFinite(reported) && reported >= 0;
     const out: CostEntry = {
       ...rest,
       ts: rest.ts ?? new Date().toISOString(),
-      costUsd: pricing ? computeCostUsd(rest.usage, pricing) : 0,
+      costUsd: hasReported ? Math.round(reported * 1e8) / 1e8 : pricing ? computeCostUsd(rest.usage, pricing) : 0,
     };
-    if (!pricing) out.unpriced = true;
+    if (!pricing && !hasReported) out.unpriced = true;
     this.log.push(out);
     return out;
   }

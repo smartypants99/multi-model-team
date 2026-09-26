@@ -69,6 +69,14 @@ export function defaultConfig(): EngineConfig {
           envKeys: ["MOONSHOT_API_KEY", "KIMI_API_KEY"],
         },
         {
+          id: "claude-code",
+          providerId: "anthropic",
+          displayName: "Claude Code CLI (subscription login)",
+          baseUrl: "cli://claude",
+          protocol: "claude-cli",
+          envKeys: [],
+        },
+        {
           id: "moonshot-cn",
           providerId: "moonshot",
           displayName: "Moonshot (Kimi) China",
@@ -85,6 +93,14 @@ export function defaultConfig(): EngineConfig {
         zai: ["glm-4.5-air", "glm-5-turbo", "glm-5.3-flash", "glm-4.6", "glm-4.5-flash"],
         moonshot: ["kimi-k2.6", "kimi-k3"],
       },
+      // Claude Code CLI transport: no models endpoint without an API key, so the table is static.
+      // Capabilities per docs/providers.md; `claude --effort` accepted low..max on every model when tested (2026-09-26, CLI 2.1.283).
+      claudeCliModels: [
+        { id: "claude-fable-5-1", displayName: "Claude Fable 5.1", vision: true, contextWindow: 1_000_000, maxOutputTokens: 128_000, effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        { id: "claude-opus-5-5", displayName: "Claude Opus 5.5", vision: true, contextWindow: 1_000_000, maxOutputTokens: 128_000, effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        { id: "claude-sonnet-5", displayName: "Claude Sonnet 5", vision: true, contextWindow: 1_000_000, maxOutputTokens: 128_000, effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        { id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5", vision: true, contextWindow: 200_000, maxOutputTokens: 64_000, effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+      ],
     },
     // USD per million tokens. Data from docs/providers.md (2026-09-26); regex keys, first match wins after exact ids.
     pricing: {
@@ -194,6 +210,10 @@ export function defaultConfig(): EngineConfig {
         ">\\s*/dev/sd|\\bdd\\s+if=",
         "\\bkill(all)?\\s+-9\\b|\\btaskkill\\b",
         "\\bshutdown\\b|\\breboot\\b",
+        // Write-capable commands: only require confirmation when aimed outside the sandbox (the classifier checks paths).
+        "\\b(mv|cp|rsync|tee|ln|install|dd|scp|xcopy|robocopy|copy|move|ren)\\b",
+        "\\bgit\\s+push\\b|\\bnpm\\s+publish\\b|\\bpip\\s+upload\\b|\\bcargo\\s+publish\\b",
+        ">{1,2}\\s*(/|~|[A-Za-z]:\\\\)",
       ],
     },
     search: { provider: "mock", envKey: "SEARCH_API_KEY", maxResults: 5 },

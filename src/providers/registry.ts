@@ -6,6 +6,8 @@ import { REASONING_LEVELS } from "../core/types.js";
 import { AnthropicAdapter } from "./anthropic.js";
 import { OpenAIResponsesAdapter } from "./openai-responses.js";
 import { OpenAIChatAdapter } from "./openai-chat.js";
+import { ClaudeCliAdapter } from "./claude-cli.js";
+import type { ClaudeCliModel } from "../config/schema.js";
 
 export type CapabilityHint = Partial<{
   vision: boolean;
@@ -24,6 +26,10 @@ export interface AdapterConfig {
   capabilityHints: CapabilityHints;
   /** Model ids to assume when a provider's models endpoint is unavailable, keyed by providerId. */
   fallbackModels?: Record<string, string[]>;
+  /** Static model table for the claude-cli transport. */
+  claudeCliModels?: ClaudeCliModel[];
+  /** Upper bound on tool round-trips the claude-cli transport may run per call. */
+  maxToolIterations?: number;
 }
 
 export function createAdapter(endpoint: ProviderEndpoint, apiKey: string, cfg: AdapterConfig): ProviderAdapter {
@@ -37,6 +43,8 @@ export function createAdapter(endpoint: ProviderEndpoint, apiKey: string, cfg: A
       const flavor = endpoint.providerId === "zai" ? "zai" : endpoint.providerId === "moonshot" ? "moonshot" : "generic";
       return new OpenAIChatAdapter(endpoint, apiKey, { ...base, flavor, fallbackModels: cfg.fallbackModels?.[endpoint.providerId] ?? [] });
     }
+    case "claude-cli":
+      return new ClaudeCliAdapter(endpoint, { ...base, models: cfg.claudeCliModels ?? [], maxToolIterations: cfg.maxToolIterations });
   }
 }
 
