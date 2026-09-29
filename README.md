@@ -186,7 +186,7 @@ This writes the run into `runs/demo/` (git-ignored). A committed copy of the sam
 
 ## Reading the logs
 
-Every run writes a folder with `events.jsonl` (machine-readable, the source of truth) and Markdown files for humans: spec, plan, team, per-task verification, discussion, red team, meeting, specialist actions and screenshots, diffs, test runs, best-version history, per-model rationales and calls, costs. `agents.json` maps "Agent B" to the real model (never shown to the models). See `docs/logs.md`.
+Every run writes a folder whose `report.md` is the one page to read first (deliverables, which agent contributed what, cost, stalls, flaky tests, open objections). Behind it are `events.jsonl` (machine-readable, the source of truth) and Markdown files for humans: spec, plan, team, per-task verification, discussion, red team, meeting, specialist actions and screenshots, diffs, test runs, best-version history, per-model rationales and calls, costs. `agents.json` maps "Agent B" to the real model (never shown to the models). See `docs/logs.md`.
 
 ## Safety features
 

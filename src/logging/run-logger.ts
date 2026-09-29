@@ -10,6 +10,8 @@
  *  - Real model names appear only in logs; anonymous labels ("Agent B") are what
  *    the models see, and agents.json maps between the two.
  */
+import { renderReport } from "./report.js";
+import { readRunEvents } from "./replay.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { EventBus } from "../core/events.js";
@@ -119,6 +121,7 @@ This folder is the complete record of one multi-model-team run.
 Secrets (API keys, tokens) are redacted before anything is written.
 
 \`\`\`
+report.md                # read this first: deliverables, contributions, cost, how the run went, open ends
 run.json                 # id, request, started/finished, status, mock flag, config summary (no secrets)
 events.jsonl             # every event, redacted, one JSON per line (machine-readable source of truth)
 agents.json              # anonymous label -> {memberId, providerId, modelId, reasoning}  (logs/UI only)
@@ -340,6 +343,13 @@ export class RunLogger {
     this.writeRunJson();
     this.writeCostsMd(true);
     this.transcript(e.ts, `## Run finished: ${this.run.status}\n\n${str(d.summary)}\n\nTotal cost ${usd(this.costRun.usd)} over ${this.costRun.calls} calls, ${this.eventCount} events.`);
+    try {
+      const events = readRunEvents(this.runDir);
+      if (!events.some((x) => x.type === "run.finished")) events.push(e);
+      this.writeFile("report.md", renderReport(events));
+    } catch (err) {
+      this.transcript(e.ts, `(report.md could not be written: ${(err as Error).message})`);
+    }
   }
 
   private writeRunJson(): void {

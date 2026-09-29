@@ -115,7 +115,13 @@ describe("full pipeline on the mock provider", () => {
     expect(result.totalCostUsd).toBeGreaterThan(0);
   });
   it("writes the log folder and outputs", () => {
-    for (const f of ["events.jsonl", "run.json", "agents.json", "spec.md", "plan.md", "team.md", "costs.md", "transcript.md"]) expect(fs.existsSync(path.join(outDir, f)), f).toBe(true);
+    for (const f of ["events.jsonl", "run.json", "agents.json", "spec.md", "plan.md", "team.md", "costs.md", "transcript.md", "report.md"]) expect(fs.existsSync(path.join(outDir, f)), f).toBe(true);
+    const report = fs.readFileSync(path.join(outDir, "report.md"), "utf8");
+    expect(report).toMatch(/\| Status \| ok \|/);
+    expect(report).toContain("## Deliverables");
+    expect(report).toMatch(/Build the pen boss game \| coder \| ok \| v\d+ from Agent [A-Z] \| 4\/4 passing/);
+    expect(report).toMatch(/rubric criteria met/);
+    expect(report).toContain("dropped out");
     expect(readRunEvents(outDir).length).toBe(events.length);
     expect(Object.keys(result.outputs).length).toBe(2);
   });
