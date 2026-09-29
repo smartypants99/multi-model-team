@@ -46,6 +46,8 @@ export interface EngineConfig {
     flakeRerun: boolean;
     /** Skip the flake re-run when a suite takes longer than this (seconds). */
     flakeRerunMaxSec: number;
+    /** Red team: at most this many targets per attacker (0 = every distinct version). */
+    redTeamMaxTargets: number;
     maxToolIterations: number;
     /** Tokens after which older discussion rounds are summarised. */
     contextBudgetTokens: number;

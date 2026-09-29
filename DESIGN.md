@@ -256,8 +256,15 @@ Per task:
 - **B independent verification.** Every other member runs `verify` in parallel
   (`Promise.allSettled`), each seeing only the lead's work, never each other.
 - **C group discussion.** See §9.
-- **D red team.** Only if `worktype.redTeam`. Every member attacks every other
-  member's work and rationale (N×(N−1) calls, in parallel per attacker).
+- **D red team.** Only if `worktype.redTeam`. Every member attacks the other
+  members' versions and rationales, in parallel per attacker. Attackers read
+  the **diff against the current best** (the work under review) rather than
+  whole files, falling back to the files when nothing is crowned yet.
+  Identical versions are attacked once instead of N times, an attacker skips
+  a version identical to its own, and `pipeline.redTeamMaxTargets` can cap
+  targets per attacker (the best's author first, the rest rotated). Findings
+  several attackers report about the same target are merged and ranked by how
+  many agents found them before they feed the improvement round and meeting.
 - **E specialist verification.** Verifier chosen by `worktype.verifier.prefer`
   against team capabilities (§10). First a *meeting* where every member votes
   on the proposed changes (same rules as the discussion, `maxMeetingRounds`);
@@ -349,6 +356,15 @@ independent.
   scores are recorded but never override tests.
 - **Stall limit.** After `stallLimit` consecutive rounds with no new best,
   keep the current best, log why, move on.
+- **Measurement and flakes.** All candidates' suites are measured in
+  parallel (each in its own sandbox; the best's fairness re-runs use a
+  per-candidate copy), then crowns are decided serially in a fixed order
+  against whatever is the best at that moment, so the outcome does not depend
+  on which suite finishes first. When a candidate and the best disagree on a
+  test, both are run once more; a test whose result changes between identical
+  runs is marked flaky, ignored for crowning from then on, and listed in the
+  improvement prompt. vitest projects run through `--reporter=tap-flat` so
+  results are per test, not one coarse pass/fail.
 - The crowned version is copied to `best/`, snapshotted to `history/vN/`
   with its `TestRun`, and copied into every sandbox as the new start.
 

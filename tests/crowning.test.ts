@@ -118,3 +118,21 @@ describe("flaky tests and parallel-safe decisions", () => {
     ]);
   });
 });
+
+import { dedupeCritiques } from "../src/pipeline/run.js";
+
+describe("red-team finding deduplication", () => {
+  it("merges the same finding from several attackers and ranks it first", () => {
+    const crit = (attackerId: string, targetId: string, issues: any[]) => ({ attackerId, targetId, issues, rationale: "", usage: { inputTokens: 0, outputTokens: 0 }, costUsd: 0 });
+    const out = dedupeCritiques([
+      crit("m2", "m1", [{ category: "bug", severity: "major", text: "Empty list makes nextBoss loop forever", location: "src/game.js:12" }]),
+      crit("m3", "m1", [{ category: "bug", severity: "critical", text: "empty list makes nextBoss() loop forever!", location: "src/game.js:14" }]),
+      crit("m3", "m1", [{ category: "security", severity: "minor", text: "Brand names not escaped", location: "src/game.js:30" }]),
+      crit("m2", "m4", [{ category: "bug", severity: "major", text: "Empty list makes nextBoss loop forever", location: "src/game.js:12" }]),
+    ], (id) => ({ m1: "Agent A", m4: "Agent D" } as any)[id] ?? id);
+    expect(out[0]).toMatchObject({ count: 2, severity: "critical" });
+    expect(out[0].line).toContain("[found by 2 agents]");
+    expect(out.filter((o) => o.line.startsWith("Agent D:")).length).toBe(1); // a different target stays separate
+    expect(out.length).toBe(3);
+  });
+});

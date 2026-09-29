@@ -175,6 +175,7 @@ export function defaultConfig(): EngineConfig {
       parallelTests: true,
       flakeRerun: true,
       flakeRerunMaxSec: 120,
+      redTeamMaxTargets: 0,
       maxToolIterations: 25,
       contextBudgetTokens: 60_000,
       minMembers: 2,

@@ -63,14 +63,20 @@ describe("full pipeline on the mock provider", () => {
     expect(devils.size).toBeGreaterThanOrEqual(2);
     expect(events.some((e) => e.type === "chat.message" && e.data.vote === "done")).toBe(true);
   });
-  it("red-teams every model against every other model at the coding task", () => {
+  it("red-teams every live model against distinct versions, never paying twice for identical code", () => {
     const team = events.find((e) => e.type === "run.team")!.data.members as any[];
     const critiques = events.filter((e) => e.type === "redteam.critique");
-    const pairs = new Set(critiques.map((c) => `${(c.data.critique as any).attackerId}->${(c.data.critique as any).targetId}`));
     const disabled = new Set(events.filter((e) => e.type === "member.disabled").map((e) => e.data.memberId));
     expect(disabled.size).toBeGreaterThan(0); // mock-broken drops out and the run continues
-    const live = team.length - disabled.size;
-    expect(pairs.size).toBe(live * (live - 1));
+    const live = team.filter((m) => !disabled.has(m.id));
+    const attackers = new Set(critiques.map((c) => (c.data.critique as any).attackerId));
+    for (const m of live) expect(attackers.has(m.id), `attacker ${m.label}`).toBe(true);
+    const pairs = new Set(critiques.map((c) => `${(c.data.critique as any).attackerId}->${(c.data.critique as any).targetId}`));
+    expect(pairs.size).toBeLessThanOrEqual(live.length * (live.length - 1));
+    for (const c of critiques) expect((c.data.critique as any).attackerId).not.toBe((c.data.critique as any).targetId);
+    if (pairs.size < live.length * (live.length - 1)) {
+      expect(events.some((e) => e.type === "chat.message" && /Red team: \d+ attack/.test(String(e.data.message)))).toBe(true);
+    }
   });
   it("crowns a best version from tests and keeps history", () => {
     const crowned = events.filter((e) => e.type === "best.crowned");

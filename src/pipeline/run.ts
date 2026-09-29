@@ -512,10 +512,12 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       if (wt.redTeam) {
         stage("red-team", task.id);
         const attackers = live();
+        const plan = planRedTeam(attackers);
+        for (const note of plan.notes) bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: note, rationale: "" }, { stage: "red-team", taskId: task.id });
         await settle(attackers.map(async (att) => {
-          for (const target of attackers.filter((t) => t.id !== att.id)) {
+          for (const target of plan.targets.get(att.id) ?? []) {
             await control.gate();
-            const targetWork = wt.workspace === "sandbox" ? await sandboxDump(target.id) : (target.isLead ? st.leadOutput : st.verifications.find((v) => v.memberId === target.id)?.findings.map((f) => f.text).join("\n") ?? "(no work)");
+            const targetWork = wt.workspace === "sandbox" ? await redTeamContext(target.id) : (target.isLead ? st.leadOutput : st.verifications.find((v) => v.memberId === target.id)?.findings.map((f) => f.text).join("\n") ?? "(no work)");
             const targetRationale = target.isLead ? st.leadRationale : (discussion.turns.filter((t) => t.memberId === target.id).map((t) => t.rationale).join("\n") || "(none)");
             try {
               const { json, result: r } = await llm.callJson<any>({ member: att, stage: "red-team", taskId: task.id, system: sys(att, "redTeam", { ...common(att), target_label: target.label, target_rationale: targetRationale, target_work: targetWork }), messages: [textMessage("user", `Attack ${target.label}'s work and reasoning. Be harsh and specific.`)], tools: toolsFor(wt).filter((t) => ["read_other_sandbox", "read_file", "run_command", "web_search", "fetch_url"].includes(t.schema.name)), toolCtx: toolCtx(att, task.id, wt), tag: `red-team/${att.label}->${target.label}`, signal });
@@ -529,7 +531,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           }
         }));
         if (wt.workspace === "sandbox") {
-          const issues = st.critiques.flatMap((c) => c.issues.filter((i) => i.severity !== "minor").map((i) => `${labelOf(c.targetId)}: ${i.text}${i.location ? ` (${i.location})` : ""}`));
+          const issues = dedupeCritiques(st.critiques, labelOf).filter((i) => i.severity !== "minor").map((i) => i.line);
           await improveUntilCrowned("fix the red-team findings about your own work and adopt valid fixes seen in others' sandboxes", issues, "after red team");
         }
       }
@@ -537,7 +539,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       // ---- Step E: specialist verification with a code meeting first
       stage("meeting", task.id);
       const { verifier, mode } = chooseVerifier(wt, others(), task);
-      const proposed = [...st.agreedChanges, ...st.critiques.flatMap((c) => c.issues.filter((i) => i.severity === "critical" || i.severity === "major").map((i) => i.text))];
+      const proposed = [...st.agreedChanges, ...dedupeCritiques(st.critiques, labelOf).filter((i) => i.severity === "critical" || i.severity === "major").map((i) => i.line)];
       const proposedText = proposed.map((c) => `- ${c}`).join("\n") || "- (no changes proposed; verify as-is)";
       let agreedText = proposedText;
       if (wt.prompts.meeting) {
@@ -638,6 +640,66 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           bus.emit("run.error", { message: `diff failed for ${m.label}: ${(e as Error).message}` }, { taskId: task.id });
           return 0;
         }
+      }
+      /**
+       * Who attacks whom. Identical sandboxes are attacked once (no paying N times to re-read the same code),
+       * an attacker skips versions identical to its own unless that is all there is, the current best's author
+       * comes first, and redTeamMaxTargets caps the rest (rotated per attacker so coverage spreads).
+       */
+      function planRedTeam(attackers: TeamMember[]): { targets: Map<string, TeamMember[]>; notes: string[] } {
+        const notes: string[] = [];
+        const targets = new Map<string, TeamMember[]>();
+        const hashOf = new Map<string, string>();
+        if (wt.workspace === "sandbox") for (const m of attackers) hashOf.set(m.id, sb.hashFiles(sb.sandboxDir(m.id), ["**"]));
+        const distinct = (list: TeamMember[]) => {
+          const seen = new Set<string>();
+          return list.filter((t) => {
+            const h = hashOf.get(t.id) ?? t.id;
+            if (seen.has(h)) return false;
+            seen.add(h);
+            return true;
+          });
+        };
+        const bestAuthor = st.best?.fromMemberId ?? lead.id;
+        attackers.forEach((att, idx) => {
+          let pool = attackers.filter((t) => t.id !== att.id);
+          if (wt.workspace === "sandbox") {
+            const notOwn = pool.filter((t) => hashOf.get(t.id) !== hashOf.get(att.id));
+            // Everyone holds the same code: attack it once, attributed to its author.
+            pool = notOwn.length ? distinct(notOwn) : attackers.filter((t) => t.id === bestAuthor && t.id !== att.id).concat(pool).slice(0, 1);
+          }
+          pool.sort((a, b) => (a.id === bestAuthor ? -1 : b.id === bestAuthor ? 1 : 0));
+          const rest = pool.slice(1);
+          const rotated = rest.slice(idx % Math.max(1, rest.length)).concat(rest.slice(0, idx % Math.max(1, rest.length)));
+          let chosen = pool.length ? [pool[0], ...rotated] : [];
+          const cap = cfg.pipeline.redTeamMaxTargets;
+          if (cap > 0 && chosen.length > cap) {
+            notes.push(`${att.label} red-teams ${cap} of ${chosen.length} distinct versions (redTeamMaxTargets); skipped: ${chosen.slice(cap).map((t) => t.label).join(", ")}.`);
+            chosen = chosen.slice(0, cap);
+          }
+          targets.set(att.id, chosen);
+        });
+        const total = [...targets.values()].reduce((n, l) => n + l.length, 0);
+        const full = attackers.length * (attackers.length - 1);
+        if (total < full) notes.push(`Red team: ${total} attack(s) instead of ${full}; identical versions are attacked once.`);
+        return { targets, notes };
+      }
+      /** What an attacker reads: the diff against the current best (the work under review), else the files themselves. */
+      async function redTeamContext(memberId: string): Promise<string> {
+        const listing = sb.listFiles(memberId).filter((f) => f.type === "file").map((f) => f.path).slice(0, 80).join("\n");
+        if (st.best && fs.existsSync(st.best.snapshotDir)) {
+          try {
+            const d = await sb.diff(st.best.snapshotDir, sb.sandboxDir(memberId));
+            if (d.files.length) {
+              const body = d.diff.length > 40_000 ? d.diff.slice(0, 40_000) + "\n…[diff truncated]" : d.diff;
+              return `Changes relative to the current best version v${st.best.version} (read unchanged files with read_other_sandbox if needed):\n${body}\n\nFiles:\n${listing}`;
+            }
+            return `This version is identical to the current best v${st.best.version}. Review the code itself:\n${await sandboxDump(memberId)}`;
+          } catch {
+            /* fall back to the files */
+          }
+        }
+        return await sandboxDump(memberId);
       }
       async function sandboxDump(memberId: string): Promise<string> {
         const files = sb.listFiles(memberId).filter((f) => f.type === "file").slice(0, 30);
@@ -814,6 +876,28 @@ async function settle<T>(ps: Promise<T>[]): Promise<T[]> {
   const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
   if (failed) throw failed.reason;
   return results.map((r) => (r as PromiseFulfilledResult<T>).value);
+}
+
+/** Merge findings several attackers reported about the same target; the most-reported and most severe come first. */
+export function dedupeCritiques(critiques: RedTeamCritique[], labelOf: (id: string) => string): { line: string; severity: string; count: number }[] {
+  const sevRank: Record<string, number> = { critical: 0, major: 1, minor: 2 };
+  const groups = new Map<string, { text: string; location?: string; severity: string; targetId: string; attackers: Set<string> }>();
+  for (const c of critiques) {
+    for (const i of c.issues) {
+      const norm = String(i.text).toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim().split(" ").slice(0, 8).join(" ");
+      const key = `${c.targetId}|${(i.location ?? "").toLowerCase().split(/[:\s(]/)[0]}|${norm}`;
+      const g = groups.get(key);
+      if (g) {
+        g.attackers.add(c.attackerId);
+        if ((sevRank[i.severity] ?? 3) < (sevRank[g.severity] ?? 3)) g.severity = i.severity;
+      } else {
+        groups.set(key, { text: i.text, location: i.location, severity: i.severity, targetId: c.targetId, attackers: new Set([c.attackerId]) });
+      }
+    }
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.attackers.size - a.attackers.size || (sevRank[a.severity] ?? 3) - (sevRank[b.severity] ?? 3))
+    .map((g) => ({ line: `${labelOf(g.targetId)}: ${g.text}${g.location ? ` (${g.location})` : ""}${g.attackers.size > 1 ? ` [found by ${g.attackers.size} agents]` : ""}`, severity: g.severity, count: g.attackers.size }));
 }
 
 function rubricRun(criteria: string[], findings: string): TestRun {
