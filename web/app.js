@@ -655,11 +655,19 @@
       .slice()
       .reverse()
       .map((b) => {
+        const attributionView = (list) => {
+          const byMember = new Map();
+          for (const a of list) byMember.set(a.fromMemberId, [...(byMember.get(a.fromMemberId) || []), a.path]);
+          return el("div", { class: "muted", title: "Which agent wrote each file of this version (never shown to the models)" },
+            "Files by author: ",
+            ...[...byMember.entries()].map(([id, files], i) => el("span", null, i ? ", " : "", who(id), ` ${files.length} file${files.length === 1 ? "" : "s"}`)));
+        };
         if (b.kind === "crowned") {
           const v = b.best || {};
           return el("div", { class: "card verdict-pass" },
             el("div", { class: "card-head" }, el("span", { class: "crown" }, "Crowned"), el("strong", null, `v${v.version}`), who(v.fromMemberId), taskChip(v.taskId), el("span", { class: "spacer" }), el("span", { class: "when" }, fmtTime(b.ts))),
             v.reason ? el("div", { class: "muted" }, text(v.reason)) : null,
+            Array.isArray(v.attribution) && v.attribution.length ? attributionView(v.attribution) : null,
             testList(v.testRun));
         }
         if (b.kind === "rejected") {

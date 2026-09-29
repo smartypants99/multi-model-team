@@ -357,6 +357,17 @@ export interface BestVersion {
   /** Absolute path of the snapshot folder. */
   snapshotDir: string;
   reason: string;
+  /**
+   * Which member each file of this version came from, and since which version.
+   * Display and statistics only: never shown to the models (it would break anonymity).
+   */
+  attribution?: FileAttribution[];
+}
+
+export interface FileAttribution {
+  path: string;
+  fromMemberId: string;
+  sinceVersion: number;
 }
 
 // ---------------------------------------------------------------------------

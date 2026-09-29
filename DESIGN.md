@@ -365,6 +365,12 @@ independent.
   lineage instead of being reset, which preserves diversity; its candidate
   still has to win the competition like any other. Both are on by default
   (`pipeline.harvest`, `pipeline.wildcard`).
+- **Attribution.** Each crowned version records which member each file came
+  from and since which version (changed files go to the new version's author,
+  unchanged files keep theirs). It appears in the dashboard, `best/history.json`
+  and the task summary ("src/ (Agent A), tests/ (Agent C)"), and an
+  `attribution.final` event tallies files per member. It is display-only and
+  never fed back into prompts as a judgement of who is better.
 - **Measurement and flakes.** All candidates' suites are measured in
   parallel (each in its own sandbox; the best's fairness re-runs use a
   per-candidate copy), then crowns are decided serially in a fixed order

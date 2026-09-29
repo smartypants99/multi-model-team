@@ -86,6 +86,22 @@ describe("full pipeline on the mock provider", () => {
     expect(fs.existsSync((codeBest!.data.best as any).snapshotDir)).toBe(true);
     expect(events.some((e) => e.type === "tests.run")).toBe(true);
   });
+  it("records which agent each file of the best version came from", () => {
+    const crowned = events.filter((e) => e.type === "best.crowned" && (e.data.best as any).snapshotDir);
+    const last = crowned[crowned.length - 1].data.best as any;
+    expect(Array.isArray(last.attribution)).toBe(true);
+    const paths = last.attribution.map((a: any) => a.path).sort();
+    const snapshotFiles: string[] = [];
+    const walk = (d: string, rel = "") => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { if (f.name === "node_modules" || f.name === ".git") continue; const r = rel ? `${rel}/${f.name}` : f.name; if (f.isDirectory()) walk(path.join(d, f.name), r); else snapshotFiles.push(r); } };
+    walk(last.snapshotDir);
+    expect(paths).toEqual(snapshotFiles.sort());
+    const team = events.find((e) => e.type === "run.team")!.data.members as any[];
+    for (const a of last.attribution) expect(team.map((m) => m.id)).toContain(a.fromMemberId);
+    const final = events.find((e) => e.type === "attribution.final");
+    expect(final).toBeTruthy();
+    const total = Object.values(final!.data.byMember as Record<string, { files: number }>).reduce((n, v) => n + v.files, 0);
+    expect(total).toBe(paths.length);
+  });
   it("runs a specialist verifier with a screenshot for the visual task", () => {
     expect(events.some((e) => e.type === "specialist.action" && e.data.screenshotPath)).toBe(true);
     expect(fs.readdirSync(path.join(outDir, "screenshots")).length).toBeGreaterThan(0);

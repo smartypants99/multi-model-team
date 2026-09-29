@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import type {
-  BestVersion, ChatMessage, CommandRequest, Interaction, MemberSelection, ModelInfo, Plan, PlanTask, RedTeamCritique, Spec, Stage,
+  BestVersion, FileAttribution, ChatMessage, CommandRequest, Interaction, MemberSelection, ModelInfo, Plan, PlanTask, RedTeamCritique, Spec, Stage,
   TeamMember, TestRun, ToolContext, ToolDefinition, UserAnswer, UserQuestion, VerificationResult, WorkTypeDefinition, VerifierPreference,
 } from "../core/types.js";
 import { EventBus } from "../core/events.js";
@@ -173,6 +173,8 @@ interface TaskState {
   flaky: Set<string>;
   /** Improvement rounds so far (drives harvest folders and wildcard rotation). */
   improveRounds: number;
+  /** Per-file provenance of the current best (display only). */
+  attribution: Map<string, FileAttribution>;
 }
 
 export async function runPipeline(opts: RunOptions, control: RunControl = new RunControl()): Promise<RunResult> {
@@ -404,7 +406,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       const wt = task && workTypes.get(task.workType);
       if (!task || !wt) continue;
       const bestOk = d.bestSnapshotDir && fs.existsSync(d.bestSnapshotDir);
-      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0 };
+      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map() };
       if (bestOk && d.bestTestRun) st.best = { version: d.bestVersion ?? 1, fromMemberId: "resumed", crownedAt: d.status, taskId: task.id, testRun: d.bestTestRun, snapshotDir: d.bestSnapshotDir!, reason: "resumed from checkpoint" };
       bus.emit("task.started", { task, resumed: true }, { taskId: task.id });
       bus.emit("task.finished", { taskId: task.id, status: d.status, summary: d.output.slice(0, 2000), resumed: true }, { taskId: task.id });
@@ -415,7 +417,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       if (done.some((d) => d.task.id === task.id)) continue;
       await control.gate();
       const wt = workTypes.get(task.workType)!;
-      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0 };
+      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map() };
       bus.emit("task.started", { task }, { taskId: task.id });
       const priorWork = done.map((d) => `### ${d.task.title} (${d.wt.name})\n${d.output.slice(0, 6000)}`).join("\n\n");
       // Prior tasks' deliverables plus, once Step A is done, the current task's draft (the thing under review).
@@ -619,7 +621,10 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           fs.rmSync(dest, { recursive: true, force: true });
           fs.cpSync(finalDir, dest, { recursive: true, filter: (s) => !/node_modules|\.git$/.test(s) });
           result.outputs[task.id] = dest;
-          st.output = `${st.leadOutput}\n\nBest version v${st.best!.version} from ${labelOf(st.best!.fromMemberId)}: ${st.best!.testRun.passed}/${st.best!.testRun.results.length} tests passing. Files: ${sb.listFiles(st.best!.fromMemberId).map((f) => f.path).slice(0, 40).join(", ")}`;
+          st.output = `${st.leadOutput}\n\nBest version v${st.best!.version} from ${labelOf(st.best!.fromMemberId)}: ${st.best!.testRun.passed}/${st.best!.testRun.results.length} tests passing. Files by author: ${attributionSummary() || sb.listFiles(st.best!.fromMemberId).map((f) => f.path).slice(0, 40).join(", ")}`;
+          const tally = new Map<string, number>();
+          for (const a of st.attribution.values()) tally.set(a.fromMemberId, (tally.get(a.fromMemberId) ?? 0) + 1);
+          bus.emit("attribution.final", { taskId: task.id, version: st.best!.version, byMember: Object.fromEntries([...tally.entries()].map(([id, n]) => [id, { label: labelOf(id), files: n }])), files: [...st.attribution.values()] }, { stage: "compete", taskId: task.id });
         } else {
           st.output = `${st.leadOutput}\n\n(no version passed the test-based competition)`;
         }
@@ -737,6 +742,34 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           extra = [`Previous attempt ${attempt} produced no version that beat the current best on every test; see the test results in the log and fix the regressions.`];
         }
         bus.emit("best.stalled", { taskId: task.id, attempts: cfg.pipeline.stallLimit, reason: `no candidate beat the current best in ${cfg.pipeline.stallLimit} attempt(s) ${when}; keeping v${st.best?.version ?? 0}` }, { stage: "compete", taskId: task.id });
+      }
+      /** Changed files in the newly crowned version are attributed to its author; unchanged files keep theirs. */
+      async function updateAttribution(prevSnap: string | undefined, snap: string, memberId: string, version: number): Promise<void> {
+        const now = new Set(sb.listFiles(memberId).filter((f) => f.type === "file").map((f) => f.path));
+        let changed: string[];
+        if (prevSnap && fs.existsSync(prevSnap)) {
+          try {
+            changed = (await sb.diff(prevSnap, snap)).files;
+          } catch {
+            changed = [...now];
+          }
+        } else {
+          changed = [...now];
+        }
+        for (const p of changed) if (now.has(p)) st.attribution.set(p, { path: p, fromMemberId: memberId, sinceVersion: version });
+        for (const p of [...st.attribution.keys()]) if (!now.has(p)) st.attribution.delete(p);
+        for (const p of now) if (!st.attribution.has(p)) st.attribution.set(p, { path: p, fromMemberId: memberId, sinceVersion: version });
+      }
+      /** "src/ (Agent A), tests/ (Agent C)": the top-level folders and files of the best, grouped by who wrote them. */
+      function attributionSummary(): string {
+        const byTop = new Map<string, Map<string, number>>();
+        for (const a of st.attribution.values()) {
+          const top = a.path.includes("/") ? a.path.split("/")[0] + "/" : a.path;
+          const m = byTop.get(top) ?? new Map<string, number>();
+          m.set(a.fromMemberId, (m.get(a.fromMemberId) ?? 0) + 1);
+          byTop.set(top, m);
+        }
+        return [...byTop.entries()].map(([top, m]) => `${top} (${[...m.entries()].sort((x, y) => y[1] - x[1]).map(([id, n]) => `${labelOf(id)}${m.size > 1 ? ` ${n}` : ""}`).join(", ")})`).join(", ");
       }
       /** Save each non-best version's diff (on disk and as a prompt excerpt) before sandboxes are reset. */
       async function harvestLosers(members: TeamMember[]): Promise<{ memberId: string; label: string; files: string[]; excerpt: string }[]> {
@@ -881,10 +914,12 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           }
           const candRun = cmp.cand;
           if (cmp.crown) {
+            const prevSnap = st.best?.snapshotDir;
             st.version++;
             const snap = sb.snapshot(m.id, st.version);
             sb.promoteToBest(m.id);
-            st.best = { version: st.version, fromMemberId: m.id, crownedAt: new Date().toISOString(), taskId: task.id, testRun: candRun, snapshotDir: snap, reason: `${when}: ${cmp.reason}` };
+            await updateAttribution(prevSnap, snap, m.id, st.version);
+            st.best = { version: st.version, fromMemberId: m.id, crownedAt: new Date().toISOString(), taskId: task.id, testRun: candRun, snapshotDir: snap, reason: `${when}: ${cmp.reason}`, attribution: [...st.attribution.values()] };
             st.bestRun = candRun;
             st.rerunCache.clear(); // later candidates compare against the new best
             crownedThisRound = true;
