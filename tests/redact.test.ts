@@ -89,3 +89,22 @@ describe("secretsFromEnv", () => {
     expect(secrets).toHaveLength(3);
   });
 });
+
+describe("Redactor generic patterns (review additions)", () => {
+  it("masks fine-grained GitHub tokens, AWS key ids, Slack tokens, JWTs and private key blocks", () => {
+    const r = new Redactor([]);
+    const K = (a: string, b: string) => a + b;
+    const samples = [
+      K("github_pat" + "_", "11ABCDEFG0123456789abcdefghijklmnopqrstuvwxyz"),
+      K("AKIA", "ABCDEFGHIJKLMNOP"),
+      K("xoxb" + "-", "123456789012-abcdefghijklmnop"),
+      ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "abcdefghijklmnopqrstuvwxyz012345"].join("."),
+      ["-----BEGIN RSA ", "PRIVATE KEY-----", "\nMIIBOgIBAAJBAK\n", "-----END RSA ", "PRIVATE KEY-----"].join(""), // assembled so the scanner never sees a key block literal
+    ];
+    for (const s of samples) {
+      const out = r.redact(`value: ${s} end`);
+      expect(out, s.slice(0, 12)).not.toContain(s);
+      expect(out).toContain("REDACTED");
+    }
+  });
+});

@@ -16,6 +16,11 @@ const GENERIC_PATTERNS: RegExp[] = [
   /sk-[A-Za-z0-9_-]{16,}/g,
   /xai-[A-Za-z0-9]{16,}/g,
   /gh[pousr]_[A-Za-z0-9]{20,}/g,
+  /github_pat_[A-Za-z0-9_]{20,}/g,
+  /AKIA[0-9A-Z]{16}/g,
+  /xox[baprs]-[A-Za-z0-9-]{10,}/g,
+  /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /Bearer [A-Za-z0-9._-]{16,}/g,
   // 32+ hex chars following a "key"/"token" word (with optional separators/quotes).
   /((?:key|token)\w*\s*[:=]?\s*["']?)([0-9a-fA-F]{32,})/gi,
@@ -107,7 +112,8 @@ export class Redactor {
   }
 }
 
-const SECRET_ENV_NAME = /KEY|TOKEN|SECRET|PASSWORD/i;
+/** Same rule the sandbox runner uses to strip variables from child environments. */
+const SECRET_ENV_NAME = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_PAT$|^GH_|^GITHUB_|AUTH|COOKIE|PRIVATE|SSH_AUTH_SOCK|DATABASE_URL|_URI$|_DSN$/i;
 const PLACEHOLDER = /your-|here/i;
 
 /**

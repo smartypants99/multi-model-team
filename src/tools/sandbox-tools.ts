@@ -23,6 +23,8 @@ export interface CommandGate {
   idOfLabel: (label: string) => string | undefined;
   /** OS-level confinement for a member's commands, and the private TMPDIR they get. */
   isolationFor?: (memberId: string) => { spec: IsolationSpec; tmpDir: string };
+  /** Strict classification (no OS sandbox available): see needsConfirmation. */
+  strict?: boolean;
 }
 
 function relArg(args: Record<string, unknown>, key = "path"): string {
@@ -115,7 +117,7 @@ export function runCommandTool(sb: SandboxManager, gate: CommandGate): ToolDefin
       const req: CommandRequest = { command, cwd, timeoutMs, estimate };
 
       // 1. Destructive outside the sandbox → user confirmation.
-      const dc = needsConfirmation(command, cwd, cwd, gate.destructivePatterns);
+      const dc = needsConfirmation(command, cwd, cwd, gate.destructivePatterns, gate.strict);
       if (dc.needed) {
         const q = { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, kind: "confirm-destructive" as const, text: `${ctx.member.label} wants to run a command that may affect files outside its sandbox: ${dc.classification.reason}`, command, cwd };
         gate.bus.emit("question.asked", { question: q }, { memberId: ctx.member.id, taskId: ctx.taskId });

@@ -102,15 +102,42 @@ export function classifyCommand(
   return { destructive, outsideSandbox: outside, reason: reasons.join("; ") };
 }
 
-/** True when the user must confirm before the command runs. */
+/**
+ * Constructs a regex classifier cannot see through: variable expansion, command
+ * substitution, inline interpreters, eval, xargs, find -exec/-delete, heredocs.
+ * Without an OS sandbox these are treated as "unclassifiable, ask the user".
+ */
+export const UNCLASSIFIABLE = /\$\{|\$\(|`|\$[A-Za-z_]|\beval\b|\b(sh|bash|zsh|dash|ksh|fish)\s+-c\b|\b(python[23]?|node|perl|ruby|php|deno|bun)\s+(-[a-zA-Z]*[ce]|--eval)\b|\bxargs\b|\bfind\b[^|;&]*\s-(delete|exec|execdir|ok)\b|<<-?\s*['"]?\w/;
+
+/** Exfiltration and persistence: always confirmed when there is no OS sandbox. */
+export const EXFIL_OR_PERSIST = /\b(crontab|at|launchctl|osascript|ssh|scp|sftp|rsync\s+[^|;&]*:|nc|ncat|netcat|socat|telnet)\b|\bcurl\b[^|;&]*\s(-d|--data\S*|-T|--upload-file|-F|--form)\b|\bwget\b[^|;&]*--post|\|\s*(sh|bash|zsh|python[23]?|node|perl)\b|\bdefaults\s+write\b|\bsystemctl\b|\breg\s+add\b|\bschtasks\b|>{1,2}\s*~\/\.(bashrc|zshrc|profile|bash_profile|ssh|config)/i;
+
+/**
+ * True when the user must confirm before the command runs.
+ * `strict` is used when no OS-level sandbox confines the shell: then any
+ * reference outside the sandbox, any unclassifiable construct and any
+ * exfiltration/persistence command needs confirmation, not only destructive
+ * ones. With an OS sandbox the regexes are only a second line of defence.
+ */
 export function needsConfirmation(
   command: string,
   cwd: string,
   sandboxDir: string | undefined,
   destructivePatterns: string[],
+  strict = false,
 ): { needed: boolean; classification: CommandClassification } {
   const classification = classifyCommand(command, cwd, sandboxDir, destructivePatterns);
-  const needed = classification.destructive && (classification.outsideSandbox || !sandboxDir);
+  let needed = classification.destructive && (classification.outsideSandbox || !sandboxDir);
+  if (strict && !needed) {
+    const reasons: string[] = [];
+    if (classification.outsideSandbox) reasons.push("references a location outside the sandbox (no OS sandbox to confine it)");
+    if (UNCLASSIFIABLE.test(command)) reasons.push("uses shell expansion, substitution or an inline interpreter the classifier cannot inspect");
+    if (EXFIL_OR_PERSIST.test(command)) reasons.push("can send data out or persist beyond the run");
+    if (reasons.length) {
+      needed = true;
+      classification.reason = `${classification.reason}; ${reasons.join("; ")}`;
+    }
+  }
   return { needed, classification };
 }
 

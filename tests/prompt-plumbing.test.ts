@@ -48,3 +48,38 @@ describe("prompt plumbing", () => {
     }
   }, 120_000);
 });
+
+describe("harvest and wildcard", () => {
+  it("shows losing versions' diffs in the next improvement prompt and rotates a wildcard that keeps its own version", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mmt-harvest-"));
+    const cfg = defaultConfig();
+    cfg.homeDir = path.join(tmp, "home");
+    cfg.pipeline.maxDiscussionRounds = 2;
+    cfg.pipeline.maxMeetingRounds = 1;
+    const mock = new MockProvider({ models: ["mock-lead", "mock-critic", "mock-agreeable", "mock-vision"] });
+    const detect = async () => {
+      const models = await mock.listModels();
+      return { providers: [{ providerId: "mock", endpointId: "mock", displayName: "mock", baseUrl: "mock://", keySource: "mock", models }], adapters: new Map([["mock", mock]]), notes: [] };
+    };
+    const interaction: Interaction = { ask: async (q) => ({ questionId: q.id, text: "auto", approved: true, data: { mode: "auto" } }) };
+    const bus = new EventBus("harvest");
+    const ws = path.join(tmp, "ws");
+    const r = await runPipeline({ request: "[worktype:coder] build a tiny game with tests", config: cfg, env: {}, mock: true, interaction, outDir: path.join(tmp, "run"), workspaceRoot: ws, bus, runId: "harvest", autoAnswer: true, detect: detect as any });
+    expect(r.status, r.error).toBe("ok");
+    const ev = bus.all();
+    const saved = ev.filter((e) => e.type === "harvest.saved");
+    expect(saved.length).toBeGreaterThan(0);
+    // Harvested versions are kept on disk.
+    expect(fs.existsSync(path.join(ws, "harvest", "harvest"))).toBe(true);
+    const improve = mock.requests.filter((q) => q.system.includes("IMPROVEMENT ROUND"));
+    expect(improve.some((q) => q.system.includes("Unadopted work from the previous round"))).toBe(true);
+    expect(improve.some((q) => q.system.includes("you are the wildcard"))).toBe(true);
+    const wildcards = ev.filter((e) => e.type === "chat.message" && /is this round's wildcard/.test(String(e.data.message))).map((e) => e.memberId);
+    expect(wildcards.length).toBeGreaterThan(0);
+    // The wildcard is never the author of the current best.
+    for (const e of ev.filter((e) => e.type === "chat.message" && /is this round's wildcard/.test(String(e.data.message)))) {
+      const before = ev.slice(0, ev.indexOf(e)).filter((x) => x.type === "best.crowned").pop();
+      if (before) expect(e.memberId).not.toBe((before.data.best as any).fromMemberId);
+    }
+  }, 180_000);
+});

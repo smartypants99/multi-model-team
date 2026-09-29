@@ -5,9 +5,10 @@
  * polled every 500ms), captures bounded stdout/stderr and strips secret-looking
  * environment variables so sandboxed commands never see API keys.
  */
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
+import { spawn, execFile, spawnSync, type ChildProcess } from "node:child_process";
 import type { CommandRequest, CommandResult } from "../core/types.js";
-import { wrapCommand, type IsolationSpec } from "./isolation.js";
+import { wrapCommand, POSIX_LIMITS_PREFIX, type IsolationSpec } from "./isolation.js";
 
 export interface RunOptions {
   rssLimitMb: number;
@@ -27,6 +28,9 @@ const TRUNCATION_MARKER = "\n...[output truncated at 2 MB]...\n";
 const SECRET_KEY = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_PAT$|^GH_|^GITHUB_|AUTH|COOKIE|PRIVATE|SSH_AUTH_SOCK|DATABASE_URL|_URI$|_DSN$/i;
 /** Variables that would point a sandboxed command at the engine's own private files. */
 const PRIVATE_LOCATION = /^(TMPDIR|TMP|TEMP|MMT_HOME|CLAUDE_CONFIG_DIR)$/;
+
+/** Env variable every sandboxed command inherits; leftover processes are found by it even after setsid/double-fork. */
+export const GROUP_ENV = "MMT_COMMAND_GROUP";
 
 /** Build the environment for a sandboxed command: process.env minus secrets and private locations, plus explicit extras. */
 export function sandboxEnv(extra?: Record<string, string>): Record<string, string> {
@@ -72,7 +76,8 @@ function spawnShell(command: string, cwd: string, env: Record<string, string>, i
       windowsVerbatimArguments: true,
     });
   }
-  const wrapped = isolation && isolation.kind !== "none" ? wrapCommand(isolation, command, cwd) : { file: "/bin/sh", args: ["-c", command] };
+  // Even without an OS sandbox, POSIX commands get the process/file-size limits.
+  const wrapped = isolation ? wrapCommand(isolation, command, cwd) : { file: "/bin/sh", args: ["-c", POSIX_LIMITS_PREFIX + command] };
   return spawn(wrapped.file, wrapped.args, {
     cwd,
     env,
@@ -177,8 +182,9 @@ const groups = new Map<string, Set<number>>();
  * process tree is killed through taskkill per remembered pid.
  */
 export function killLeftoverProcesses(groupKey: string): number {
-  const set = groups.get(groupKey);
-  if (!set) return 0;
+  const set = groups.get(groupKey) ?? new Set<number>();
+  for (const pid of pidsWithGroupEnv(groupKey)) set.add(pid);
+  if (!set.size) return 0;
   let killed = 0;
   for (const pid of set) {
     let hit = false;
@@ -200,10 +206,34 @@ export function killLeftoverProcesses(groupKey: string): number {
   return killed;
 }
 
+/** Live pids whose environment carries the group marker (POSIX; best effort, never throws). */
+export function pidsWithGroupEnv(groupKey: string): number[] {
+  const marker = `${GROUP_ENV}=${groupKey}`;
+  const out: number[] = [];
+  try {
+    if (process.platform === "linux") {
+      for (const d of fs.readdirSync("/proc")) {
+        if (!/^\d+$/.test(d) || Number(d) === process.pid) continue;
+        try {
+          if (fs.readFileSync(`/proc/${d}/environ`).toString("latin1").split("\0").includes(marker)) out.push(Number(d));
+        } catch { /* not ours or gone */ }
+      }
+    } else if (process.platform === "darwin") {
+      const r = spawnSync("ps", ["-E", "-A", "-o", "pid=,command="], { encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+      for (const line of String(r.stdout || "").split("\n")) {
+        if (!line.includes(marker)) continue;
+        const pid = Number(line.trim().split(/\s+/)[0]);
+        if (pid && pid !== process.pid) out.push(pid);
+      }
+    }
+  } catch { /* best effort */ }
+  return out;
+}
+
 export function runCommand(req: CommandRequest, opts: RunOptions): Promise<CommandResult> {
   const start = Date.now();
   const timeoutMs = Math.max(1, opts.timeoutMs);
-  const env = sandboxEnv(opts.env);
+  const env = sandboxEnv({ ...(opts.groupKey ? { [GROUP_ENV]: opts.groupKey } : {}), ...(opts.env ?? {}) });
   const stdout = new BoundedCapture();
   const stderr = new BoundedCapture();
 

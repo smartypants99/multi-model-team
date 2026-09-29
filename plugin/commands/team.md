@@ -59,6 +59,9 @@ Decide the mode:
 
 ## Step 3: start the run (detached)
 
+If the user asks to approve the plan or to decide at each crowned version,
+add `--review plan,crown` (or just one of them) to the run command below.
+
 ```
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli/main.js" run --detach --request "<request>" [--mock]
 ```
@@ -112,6 +115,12 @@ Loop until the run reaches a terminal status:
      `--approve` or `--deny`. Never approve on the user's behalf.
    - `cost-cap`: show the cost so far and the cap. Options: Continue / Stop.
      Answer `continue --approve` or `stop --deny`.
+   - `review-plan`: show the numbered `tasks` (work type, title, criteria).
+     Options: Start with this plan / Amend (free text) / Stop. Answer `ok`, the
+     amendment text, or `stop`.
+   - `review-crown`: show `label`, `version`, `reason` and `changedFiles`.
+     Options: Accept / Keep improving / Stop improving here. Answer `accept`,
+     `keep improving` or `stop here`.
    - any other kind: show `text` and take free text.
 
 3. Repeat until `status` is `ok`, `stopped` or `failed`.

@@ -342,6 +342,10 @@ export interface TestRun {
   failed: number;
   rawOutput: string;
   command: string;
+  /** Wall-clock time of the suite run. */
+  durationMs?: number;
+  /** Tests excluded from this comparison because they flipped between identical runs. */
+  flaky?: string[];
 }
 
 export interface BestVersion {
@@ -353,6 +357,17 @@ export interface BestVersion {
   /** Absolute path of the snapshot folder. */
   snapshotDir: string;
   reason: string;
+  /**
+   * Which member each file of this version came from, and since which version.
+   * Display and statistics only: never shown to the models (it would break anonymity).
+   */
+  attribution?: FileAttribution[];
+}
+
+export interface FileAttribution {
+  path: string;
+  fromMemberId: string;
+  sinceVersion: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +420,8 @@ export type UserQuestion =
   | { id: string; kind: "select-model"; endpointId: string; text: string; models: ModelInfo[] }
   | { id: string; kind: "confirm-destructive"; text: string; command: string; cwd: string }
   | { id: string; kind: "cost-cap"; text: string; spentUsd: number; capUsd: number }
+  | { id: string; kind: "review-plan"; text: string; tasks: { id: string; title: string; workType: string; acceptanceCriteria: string[] }[] }
+  | { id: string; kind: "review-crown"; text: string; taskId: string; version: number; label: string; reason: string; changedFiles: number }
   | { id: string; kind: "resource-block"; text: string; command: string; estimate: ResourceEstimate };
 
 export interface UserAnswer {

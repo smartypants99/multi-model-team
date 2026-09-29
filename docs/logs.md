@@ -5,6 +5,7 @@ or the folder given with `--out`). The same layout is written as a README
 into each run folder. Secrets are redacted before anything touches disk.
 
 ```
+report.md                the one page to read first: deliverables, who contributed what, cost, how the run went, open ends
 run.json                 id, request, started/finished, status, mock flag, config summary
 checkpoint.json          spec, plan and completed tasks, written as the run progresses; `mmt run --resume <runId>` continues from it
 events.jsonl             every event, one JSON object per line — the machine-readable source of truth
@@ -40,7 +41,7 @@ output/                  the deliverables: <taskId>.md for documents, <taskId>/ 
 
 ## Where to look first
 
-- **What happened?** `transcript.md`, then `tasks/<id>/discussion.md`.
+- **What happened?** `report.md`, then `transcript.md` and `tasks/<id>/discussion.md`.
 - **Why did the team change its mind?** Position-change blocks in `discussion.md`
   each carry the evidence given; unsupported changes are marked as such.
 - **Which version won and why?** `tasks/<id>/best-history.md` and `best/history.json`.

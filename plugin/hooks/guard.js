@@ -65,8 +65,8 @@ async function main() {
   let decision;
   if (tool === "Bash") {
     decision = await checkBash(String(toolInput.command || ""), String(input.cwd || process.cwd()), roots);
-  } else if (tool === "Write" || tool === "Edit" || tool === "MultiEdit") {
-    decision = checkFileWrite(String(toolInput.file_path || ""), roots);
+  } else if (tool === "Write" || tool === "Edit" || tool === "MultiEdit" || tool === "NotebookEdit") {
+    decision = checkFileWrite(String(toolInput.file_path || toolInput.notebook_path || ""), roots);
   }
   if (!decision) return;
 
@@ -86,6 +86,8 @@ async function main() {
 // ---------------------------------------------------------------------------
 
 async function checkBash(command, cwd, roots) {
+  const hit = bashWritesIntoSandbox(command, cwd, roots);
+  if (hit) return { permission: "ask", reason: `multi-model-team: this command may modify files inside the engine's sandboxes (${hit}); those belong to the models.` };
   if (!command.trim()) return undefined;
   const engine = await loadEngine();
   const patterns = engine?.patterns ?? FALLBACK_DESTRUCTIVE_PATTERNS;
@@ -113,6 +115,30 @@ async function checkBash(command, cwd, roots) {
       `multi-model-team: destructive command outside the engine's sandboxes (${first.reason}). ` +
       `cwd=${cwdAbs}. Confirm before it runs on the host.`,
   };
+}
+
+/** Bash commands that could write into an engine sandbox (redirects, cp/mv/tee/rsync targets) are asked about. */
+function bashWritesIntoSandbox(command, cwd, roots) {
+  const norm = (p) => String(p).replace(/\\/g, "/").toLowerCase();
+  const lower = norm(command);
+  const writes = /(^|[\s;&|])(cp|mv|tee|rsync|ln|install|dd|rm|rmdir|truncate|sed\s+-i|chmod|chown|touch|mkdir)\b/.test(lower) || />{1,2}\s*\S*/.test(lower);
+  if (!writes) return undefined;
+  const owned = ownedMemberIds();
+  const cwdSandbox = sandboxFor(path.resolve(cwd || "."), roots);
+  for (const root of roots) {
+    const r = norm(root);
+    if (!lower.includes(r)) continue;
+    // Every mentioned path under this root must be in the sandbox the command already runs in, or one Claude Code owns.
+    const mentioned = (command.match(/\S+/g) || []).map((t) => t.replace(/^["']|["']$/g, "")).filter((t) => norm(t).includes(r));
+    const ok = mentioned.every((t) => {
+      const sb = sandboxFor(path.resolve(t), roots);
+      if (!sb) return false;
+      if (cwdSandbox && norm(sb) === norm(cwdSandbox)) return true;
+      return owned.has(path.basename(sb));
+    });
+    if (!ok) return root;
+  }
+  return undefined;
 }
 
 function checkFileWrite(filePath, roots) {

@@ -40,6 +40,18 @@ export interface EngineConfig {
     maxDiscussionRounds: number;
     maxMeetingRounds: number;
     stallLimit: number;
+    /** Measure all candidates' test suites at the same time (decisions stay serial and ordered). */
+    parallelTests: boolean;
+    /** When a candidate and the best disagree on a test, re-run both once and ignore tests that flip. */
+    flakeRerun: boolean;
+    /** Skip the flake re-run when a suite takes longer than this (seconds). */
+    flakeRerunMaxSec: number;
+    /** Red team: at most this many targets per attacker (0 = every distinct version). */
+    redTeamMaxTargets: number;
+    /** Before sandboxes are reset to the best, keep each losing version's diff and show it in the next improvement prompt. */
+    harvest: boolean;
+    /** With 3+ members, one member (rotating) keeps its own lineage instead of being reset to the best. */
+    wildcard: boolean;
     maxToolIterations: number;
     /** Tokens after which older discussion rounds are summarised. */
     contextBudgetTokens: number;

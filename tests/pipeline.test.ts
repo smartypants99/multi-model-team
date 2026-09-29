@@ -63,14 +63,20 @@ describe("full pipeline on the mock provider", () => {
     expect(devils.size).toBeGreaterThanOrEqual(2);
     expect(events.some((e) => e.type === "chat.message" && e.data.vote === "done")).toBe(true);
   });
-  it("red-teams every model against every other model at the coding task", () => {
+  it("red-teams every live model against distinct versions, never paying twice for identical code", () => {
     const team = events.find((e) => e.type === "run.team")!.data.members as any[];
     const critiques = events.filter((e) => e.type === "redteam.critique");
-    const pairs = new Set(critiques.map((c) => `${(c.data.critique as any).attackerId}->${(c.data.critique as any).targetId}`));
     const disabled = new Set(events.filter((e) => e.type === "member.disabled").map((e) => e.data.memberId));
     expect(disabled.size).toBeGreaterThan(0); // mock-broken drops out and the run continues
-    const live = team.length - disabled.size;
-    expect(pairs.size).toBe(live * (live - 1));
+    const live = team.filter((m) => !disabled.has(m.id));
+    const attackers = new Set(critiques.map((c) => (c.data.critique as any).attackerId));
+    for (const m of live) expect(attackers.has(m.id), `attacker ${m.label}`).toBe(true);
+    const pairs = new Set(critiques.map((c) => `${(c.data.critique as any).attackerId}->${(c.data.critique as any).targetId}`));
+    expect(pairs.size).toBeLessThanOrEqual(live.length * (live.length - 1));
+    for (const c of critiques) expect((c.data.critique as any).attackerId).not.toBe((c.data.critique as any).targetId);
+    if (pairs.size < live.length * (live.length - 1)) {
+      expect(events.some((e) => e.type === "chat.message" && /Red team: \d+ attack/.test(String(e.data.message)))).toBe(true);
+    }
   });
   it("crowns a best version from tests and keeps history", () => {
     const crowned = events.filter((e) => e.type === "best.crowned");
@@ -79,6 +85,22 @@ describe("full pipeline on the mock provider", () => {
     expect(codeBest).toBeTruthy();
     expect(fs.existsSync((codeBest!.data.best as any).snapshotDir)).toBe(true);
     expect(events.some((e) => e.type === "tests.run")).toBe(true);
+  });
+  it("records which agent each file of the best version came from", () => {
+    const crowned = events.filter((e) => e.type === "best.crowned" && (e.data.best as any).snapshotDir);
+    const last = crowned[crowned.length - 1].data.best as any;
+    expect(Array.isArray(last.attribution)).toBe(true);
+    const paths = last.attribution.map((a: any) => a.path).sort();
+    const snapshotFiles: string[] = [];
+    const walk = (d: string, rel = "") => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { if (f.name === "node_modules" || f.name === ".git") continue; const r = rel ? `${rel}/${f.name}` : f.name; if (f.isDirectory()) walk(path.join(d, f.name), r); else snapshotFiles.push(r); } };
+    walk(last.snapshotDir);
+    expect(paths).toEqual(snapshotFiles.sort());
+    const team = events.find((e) => e.type === "run.team")!.data.members as any[];
+    for (const a of last.attribution) expect(team.map((m) => m.id)).toContain(a.fromMemberId);
+    const final = events.find((e) => e.type === "attribution.final");
+    expect(final).toBeTruthy();
+    const total = Object.values(final!.data.byMember as Record<string, { files: number }>).reduce((n, v) => n + v.files, 0);
+    expect(total).toBe(paths.length);
   });
   it("runs a specialist verifier with a screenshot for the visual task", () => {
     expect(events.some((e) => e.type === "specialist.action" && e.data.screenshotPath)).toBe(true);
@@ -93,7 +115,13 @@ describe("full pipeline on the mock provider", () => {
     expect(result.totalCostUsd).toBeGreaterThan(0);
   });
   it("writes the log folder and outputs", () => {
-    for (const f of ["events.jsonl", "run.json", "agents.json", "spec.md", "plan.md", "team.md", "costs.md", "transcript.md"]) expect(fs.existsSync(path.join(outDir, f)), f).toBe(true);
+    for (const f of ["events.jsonl", "run.json", "agents.json", "spec.md", "plan.md", "team.md", "costs.md", "transcript.md", "report.md"]) expect(fs.existsSync(path.join(outDir, f)), f).toBe(true);
+    const report = fs.readFileSync(path.join(outDir, "report.md"), "utf8");
+    expect(report).toMatch(/\| Status \| ok \|/);
+    expect(report).toContain("## Deliverables");
+    expect(report).toMatch(/Build the pen boss game \| coder \| ok \| v\d+ from Agent [A-Z] \| 4\/4 passing/);
+    expect(report).toMatch(/rubric criteria met/);
+    expect(report).toContain("dropped out");
     expect(readRunEvents(outDir).length).toBe(events.length);
     expect(Object.keys(result.outputs).length).toBe(2);
   });
@@ -167,3 +195,46 @@ describe("resume from checkpoint", () => {
     expect(Object.keys(r2.outputs).sort()).toEqual(["t1", "t2"]);
   }, 300_000);
 });
+
+describe("human checkpoints (--review plan,crown)", () => {
+  it("lets the user amend the plan and stop improving at a crown", async () => {
+    const asked: UserQuestion[] = [];
+    const inter: Interaction = {
+      ask: async (q) => {
+        asked.push(q);
+        if (q.kind === "review-plan") return { questionId: q.id, text: "please keep it to the game only" };
+        if (q.kind === "review-crown") return { questionId: q.id, text: "stop here" };
+        return { questionId: q.id, text: "auto", approved: true, data: { mode: "auto" } };
+      },
+    };
+    const bus = new EventBus("review-1");
+    const r = await runPipeline({ request: "research the top pen brands and make a game with better pens being bosses", config: cfg(), env: {}, mock: true, interaction: inter, outDir: path.join(tmp, "run-review"), workspaceRoot: path.join(tmp, "ws-review"), bus, runId: "review-1", review: ["plan", "crown"] });
+    expect(r.status, r.error).toBe("ok");
+    const ev = bus.all();
+    expect(asked.some((q) => q.kind === "review-plan")).toBe(true);
+    const plans = ev.filter((e) => e.type === "plan.written");
+    expect(plans.length).toBe(2);
+    expect(plans[1].data.amended).toBe(true);
+    expect(plans[1].data.userAmendment).toBe("please keep it to the game only");
+    expect(llmTags(ev)).toContain("plan-amend");
+    // Stopping at the first crown of the coding task skips its red team and improvement rounds.
+    const crownQs = asked.filter((q) => q.kind === "review-crown");
+    expect(crownQs.length).toBeGreaterThan(0);
+    const t2 = ev.filter((e) => e.taskId === "t2");
+    expect(t2.some((e) => e.type === "run.stage" && e.data.stage === "red-team")).toBe(false);
+    expect(t2.some((e) => e.type === "chat.message" && /stop improving this task/.test(String(e.data.message)))).toBe(true);
+    expect(t2.some((e) => e.type === "run.stage" && e.data.stage === "specialist")).toBe(true);
+  }, 300_000);
+
+  it("never asks review questions under --yes", async () => {
+    const asked: UserQuestion[] = [];
+    const inter: Interaction = { ask: async (q) => { asked.push(q); return { questionId: q.id, text: "auto", approved: true, data: { mode: "auto" } }; } };
+    const r = await runPipeline({ request: "[worktype:writing] a haiku", config: cfg(), env: {}, mock: true, interaction: inter, outDir: path.join(tmp, "run-review-yes"), workspaceRoot: path.join(tmp, "ws-review-yes"), bus: new EventBus("review-2"), runId: "review-2", autoAnswer: true, review: ["plan", "crown"] });
+    expect(r.status, r.error).toBe("ok");
+    expect(asked.filter((q) => q.kind === "review-plan" || q.kind === "review-crown")).toEqual([]);
+  }, 120_000);
+});
+
+function llmTags(ev: RunEvent[]): string[] {
+  return ev.filter((e) => e.type === "llm.call").map((e) => String(e.data.tag));
+}

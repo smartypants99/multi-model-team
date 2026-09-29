@@ -24,6 +24,10 @@ export function unattendedAnswer(q: UserQuestion): UserAnswer {
       return { questionId: q.id, text: "denied (unattended run: nobody could confirm)", approved: false };
     case "cost-cap":
       return { questionId: q.id, text: "stop (unattended run: nobody could approve more spending)", approved: false };
+    case "review-plan":
+      return { questionId: q.id, text: "ok" };
+    case "review-crown":
+      return { questionId: q.id, text: "accept" };
   }
 }
 
@@ -89,6 +93,16 @@ export function terminalInteraction(out: NodeJS.WriteStream = process.stdout, in
           out.write(`  command: ${q.command}\n  cwd: ${q.cwd}\n`);
           const a = await prompt("allow? [y/N] ");
           return { questionId: q.id, text: a, approved: /^y(es)?$/i.test(a) };
+        }
+        case "review-plan": {
+          q.tasks.forEach((t, i) => out.write(`  ${i + 1}. [${t.workType}] ${t.title}\n     ${t.acceptanceCriteria.join("; ")}\n`));
+          const a = await prompt("ok / describe a change / stop: ");
+          return { questionId: q.id, text: a || "ok" };
+        }
+        case "review-crown": {
+          out.write(`  ${q.changedFiles} file(s) changed in v${q.version}\n`);
+          const a = (await prompt("[a]ccept / [k]eep improving / [s]top here: ")).toLowerCase();
+          return { questionId: q.id, text: a.startsWith("k") ? "keep improving" : a.startsWith("s") ? "stop here" : "accept" };
         }
         case "cost-cap": {
           const a = await prompt(`spent $${q.spentUsd.toFixed(2)} of $${q.capUsd}. continue? [y/N] `);

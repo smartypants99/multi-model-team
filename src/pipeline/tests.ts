@@ -12,7 +12,7 @@ export interface DetectedSuite {
   command: string;
   /** Files whose change means "the suite changed" (glob-like patterns). */
   suitePatterns: string[];
-  kind: "node-test" | "npm" | "pytest" | "go" | "cargo" | "custom";
+  kind: "node-test" | "vitest" | "npm" | "pytest" | "go" | "cargo" | "custom";
 }
 
 export function detectTestCommand(dir: string, configured?: string): DetectedSuite | undefined {
@@ -23,6 +23,11 @@ export function detectTestCommand(dir: string, configured?: string): DetectedSui
       const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
       const script: string | undefined = pkg.scripts?.test;
       if (script && !/no test specified/i.test(script)) {
+        // vitest's default reporter is not line-parseable; its flat TAP reporter is. In a
+        // non-interactive shell vitest runs once (no watch), so `npm test -- ...` is safe.
+        if (/^\s*vitest(\s+run)?(\s+[^&|;]*)?$/.test(script)) {
+          return { command: "npm test -- --reporter=tap-flat", suitePatterns: ["tests/**", "test/**", "**/*.test.*", "**/*.spec.*"], kind: "vitest" };
+        }
         const kind = /node\s+--test/.test(script) ? "node-test" : "npm";
         const cmd = kind === "node-test" ? script.replace(/node\s+--test/, "node --test --test-reporter=tap") : "npm test";
         return { command: cmd, suitePatterns: ["tests/**", "test/**", "**/*.test.*", "**/*.spec.*"], kind };
@@ -64,6 +69,7 @@ export function parseTestOutput(kind: DetectedSuite["kind"], res: CommandResult)
   };
   switch (kind) {
     case "node-test":
+    case "vitest":
     case "npm": {
       for (const l of lines) {
         const tap = l.match(/^\s*(not ok|ok)\s+\d+\s*-\s*(.+?)(\s*#.*)?$/);
@@ -102,7 +108,48 @@ export function parseTestOutput(kind: DetectedSuite["kind"], res: CommandResult)
 
 export function makeTestRun(command: string, suiteHash: string, res: CommandResult, results: TestResult[]): TestRun {
   const passed = results.filter((r) => r.passed).length;
-  return { suiteHash, results, passed, failed: results.length - passed, rawOutput: `${res.stdout}\n${res.stderr}`.slice(0, 20_000), command };
+  return { suiteHash, results, passed, failed: results.length - passed, rawOutput: `${res.stdout}\n${res.stderr}`.slice(0, 20_000), command, durationMs: res.durationMs };
+}
+
+/**
+ * The crowning decision with a flake check. If best and candidate disagree on
+ * some test and a re-run is allowed, both sides are run once more; any test
+ * whose result changes between identical runs is flaky and dropped from both
+ * sides before the ordinary compareRuns rule decides.
+ */
+export async function decideWithFlakeCheck(
+  best: TestRun | undefined,
+  cand: TestRun,
+  opts: { knownFlaky: Iterable<string>; allowRerun: boolean; rerun: () => Promise<{ cand: TestRun; best?: TestRun }> },
+): Promise<{ crown: boolean; reason: string; cand: TestRun; best?: TestRun; newlyFlaky: string[] }> {
+  let c = withoutTests(cand, opts.knownFlaky);
+  let b = best ? withoutTests(best, opts.knownFlaky) : undefined;
+  let newlyFlaky: string[] = [];
+  if (b && opts.allowRerun && disagreements(b, c).length) {
+    const again = await opts.rerun();
+    newlyFlaky = [...new Set([...disagreements(cand, again.cand), ...(again.best && best ? disagreements(best, again.best) : [])])];
+    if (newlyFlaky.length) {
+      c = withoutTests(c, newlyFlaky);
+      b = withoutTests(b, newlyFlaky);
+    }
+  }
+  const cmp = compareRuns(b, c);
+  return { ...cmp, cand: c, best: b, newlyFlaky };
+}
+
+/** Names of tests whose result differs between two runs (present in both). */
+export function disagreements(a: TestRun, b: TestRun): string[] {
+  const bm = new Map(b.results.map((r) => [r.name, r.passed]));
+  return a.results.filter((r) => bm.has(r.name) && bm.get(r.name) !== r.passed).map((r) => r.name);
+}
+
+/** A copy of `run` without the named tests (counts recomputed). */
+export function withoutTests(run: TestRun, names: Iterable<string>): TestRun {
+  const drop = new Set(names);
+  if (!drop.size) return run;
+  const results = run.results.filter((r) => !drop.has(r.name));
+  const passed = results.filter((r) => r.passed).length;
+  return { ...run, results, passed, failed: results.length - passed, flaky: [...new Set([...(run.flaky ?? []), ...drop])] };
 }
 
 /**

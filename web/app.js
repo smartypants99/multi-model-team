@@ -655,11 +655,19 @@
       .slice()
       .reverse()
       .map((b) => {
+        const attributionView = (list) => {
+          const byMember = new Map();
+          for (const a of list) byMember.set(a.fromMemberId, [...(byMember.get(a.fromMemberId) || []), a.path]);
+          return el("div", { class: "muted", title: "Which agent wrote each file of this version (never shown to the models)" },
+            "Files by author: ",
+            ...[...byMember.entries()].map(([id, files], i) => el("span", null, i ? ", " : "", who(id), ` ${files.length} file${files.length === 1 ? "" : "s"}`)));
+        };
         if (b.kind === "crowned") {
           const v = b.best || {};
           return el("div", { class: "card verdict-pass" },
             el("div", { class: "card-head" }, el("span", { class: "crown" }, "Crowned"), el("strong", null, `v${v.version}`), who(v.fromMemberId), taskChip(v.taskId), el("span", { class: "spacer" }), el("span", { class: "when" }, fmtTime(b.ts))),
             v.reason ? el("div", { class: "muted" }, text(v.reason)) : null,
+            Array.isArray(v.attribution) && v.attribution.length ? attributionView(v.attribution) : null,
             testList(v.testRun));
         }
         if (b.kind === "rejected") {
@@ -808,6 +816,23 @@
         form.append(el("div", { class: "row" },
           el("button", { class: "btn btn-pass", onclick: (ev) => submit({ text: "approve", approved: true }, ev.currentTarget) }, q.kind === "resource-block" ? "Allow" : "Approve"),
           el("button", { class: "btn btn-danger", onclick: (ev) => submit({ text: "deny", approved: false }, ev.currentTarget) }, "Deny")));
+        break;
+      }
+      case "review-plan": {
+        form.append(el("ol", null, (q.tasks || []).map((t) => el("li", null, el("span", { class: "chip" }, text(t.workType)), " ", text(t.title), (t.acceptanceCriteria || []).length ? el("div", { class: "faint" }, text(t.acceptanceCriteria.join("; "))) : null))));
+        const ta = el("textarea", { placeholder: "Optional: describe a change to the plan" });
+        form.append(ta, el("div", { class: "row" },
+          el("button", { class: "btn btn-pass", onclick: (ev) => submit({ text: "ok" }, ev.currentTarget) }, "Start with this plan"),
+          el("button", { class: "btn btn-primary", onclick: (ev) => ta.value.trim() && submit({ text: ta.value.trim() }, ev.currentTarget) }, "Amend the plan"),
+          el("button", { class: "btn btn-danger", onclick: (ev) => submit({ text: "stop" }, ev.currentTarget) }, "Stop")));
+        break;
+      }
+      case "review-crown": {
+        form.append(el("div", { class: "muted" }, `${q.changedFiles} file(s) changed in v${q.version}. ${text(q.reason || "")}`));
+        form.append(el("div", { class: "row" },
+          el("button", { class: "btn btn-pass", onclick: (ev) => submit({ text: "accept" }, ev.currentTarget) }, "Accept and continue"),
+          el("button", { class: "btn btn-primary", onclick: (ev) => submit({ text: "keep improving" }, ev.currentTarget) }, "Keep improving"),
+          el("button", { class: "btn btn-danger", onclick: (ev) => submit({ text: "stop here" }, ev.currentTarget) }, "Stop improving here")));
         break;
       }
       case "cost-cap": {

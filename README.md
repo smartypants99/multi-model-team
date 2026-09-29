@@ -164,6 +164,7 @@ node dist/cli/main.js wait <runId>   # block until finished or a question is pen
 node dist/cli/main.js answer <runId> <questionId> "text"
 node dist/cli/main.js stop <runId>   # also pause / resume
 node dist/cli/main.js run --resume <runId>   # continue an interrupted run; finished tasks are not redone
+node dist/cli/main.js run --request "..." --review plan,crown   # approve/amend the plan, accept or stop at each crowned version
 node dist/cli/main.js --help
 ```
 
@@ -185,12 +186,13 @@ This writes the run into `runs/demo/` (git-ignored). A committed copy of the sam
 
 ## Reading the logs
 
-Every run writes a folder with `events.jsonl` (machine-readable, the source of truth) and Markdown files for humans: spec, plan, team, per-task verification, discussion, red team, meeting, specialist actions and screenshots, diffs, test runs, best-version history, per-model rationales and calls, costs. `agents.json` maps "Agent B" to the real model (never shown to the models). See `docs/logs.md`.
+Every run writes a folder whose `report.md` is the one page to read first (deliverables, which agent contributed what, cost, stalls, flaky tests, open objections). Behind it are `events.jsonl` (machine-readable, the source of truth) and Markdown files for humans: spec, plan, team, per-task verification, discussion, red team, meeting, specialist actions and screenshots, diffs, test runs, best-version history, per-model rationales and calls, costs. `agents.json` maps "Agent B" to the real model (never shown to the models). See `docs/logs.md`.
 
 ## Safety features
 
 - **Sandboxes**: one directory per model, outside the repository. A model may do anything inside its own sandbox, including deleting files, and can only read the others'. On macOS (`sandbox-exec`) and Linux with `bwrap` installed, every command a model runs is also confined by the operating system: it cannot write outside its sandbox and cannot read your `.env`, `~/.ssh`, `~/.aws`, GitHub CLI or browser credentials. `npm run doctor` tells you whether that layer is active on your machine.
 - **Destructive-command confirmation**: anything destructive that could touch files outside a sandbox (absolute paths, `..`, `sudo`, global uninstalls, system settings) pauses the run and asks you. The Claude Code hook applies the same rule to Claude Code's own commands.
+- **Without an OS sandbox** (Windows, or Linux without `bwrap`): the command classifier runs in strict mode. Any command that references a location outside the sandbox, uses shell expansion or an inline interpreter the classifier cannot inspect (`$HOME`, `$(...)`, `eval`, `sh -c`, `python -c`, `node -e`, `xargs`, `find -exec`), or could send data out or persist beyond the run (`curl -d`, `nc`, `ssh`, `crontab`, `| sh`) asks for your confirmation. Expect more prompts on such hosts; that is the trade-off for not having an OS-level boundary.
 - **Unattended runs**: when nobody can answer (stdin is not a terminal and no dashboard is open, or `MMT_UNATTENDED=1` for detached runs) the engine takes the safe answer: destructive commands are denied, the cost cap stops the run, model selection goes to auto, and clarifications get "use your best judgement". Nothing is ever auto-approved.
 - **Resource guard**: the engine measures your real RAM, free disk, cores and GPU/unified memory. Heavy commands must carry a resource estimate; every model votes on it; the engine blocks anything above a safe fraction (60 % by default) and kills processes that exceed their memory limit. Every command has a timeout, and sandboxed commands never see your API keys.
 

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import type {
-  BestVersion, ChatMessage, CommandRequest, Interaction, MemberSelection, ModelInfo, Plan, PlanTask, RedTeamCritique, Spec, Stage,
+  BestVersion, FileAttribution, ChatMessage, CommandRequest, Interaction, MemberSelection, ModelInfo, Plan, PlanTask, RedTeamCritique, Spec, Stage,
   TeamMember, TestRun, ToolContext, ToolDefinition, UserAnswer, UserQuestion, VerificationResult, WorkTypeDefinition, VerifierPreference,
 } from "../core/types.js";
 import { EventBus } from "../core/events.js";
@@ -33,7 +33,7 @@ import { fileTools, runCommandTool } from "../tools/sandbox-tools.js";
 import { screenshotTool } from "../tools/screenshot.js";
 import { Llm, MemberFailedError, textMessage, type CallResult } from "./llm.js";
 import { runDiscussion, ANTI_GROUPTHINK_RULES } from "./discussion.js";
-import { detectTestCommand, parseTestOutput, makeTestRun, compareRuns } from "./tests.js";
+import { detectTestCommand, parseTestOutput, makeTestRun, decideWithFlakeCheck } from "./tests.js";
 import * as P from "./prompts.js";
 
 export interface RunOptions {
@@ -51,6 +51,8 @@ export interface RunOptions {
   runId?: string;
   /** Answer clarifying questions automatically ("use your best judgement"). */
   autoAnswer?: boolean;
+  /** Human checkpoints: "plan" asks you to approve or amend the plan, "crown" asks at every crowned version. Skipped with autoAnswer. */
+  review?: ("plan" | "crown")[];
   reselect?: boolean;
   signal?: AbortSignal;
   /** Test hook: replace provider detection. */
@@ -169,6 +171,16 @@ interface TaskState {
   agreedChanges: string[];
   /** Re-runs of the current best on changed test suites, keyed by suite hash. */
   rerunCache: Map<string, TestRun>;
+  /** Tests seen flipping between identical runs; excluded from crowning comparisons. */
+  flaky: Set<string>;
+  /** Improvement rounds so far (drives harvest folders and wildcard rotation). */
+  improveRounds: number;
+  /** Per-file provenance of the current best (display only). */
+  attribution: Map<string, FileAttribution>;
+  /** The user chose "stop here" at a crown checkpoint: no more improvement rounds for this task. */
+  userStop: boolean;
+  /** Extra improvement attempts the user granted at crown checkpoints. */
+  extraAttempts: number;
 }
 
 export async function runPipeline(opts: RunOptions, control: RunControl = new RunControl()): Promise<RunResult> {
@@ -200,6 +212,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
   if (opts.resumeFrom && !resumed) throw new Error(`No usable checkpoint.json in ${opts.resumeFrom}`);
   const checkpoint: Checkpoint = resumed ?? { version: 1, request: opts.request, done: [], updatedAt: "" };
   const saveCheckpoint = () => writeCheckpoint(outDir, checkpoint);
+  const reviewSet = new Set(opts.review ?? []);
   bus.emit("run.started", { request: opts.request, mock: opts.mock, resumedFrom: opts.resumeFrom, configSummary: { maxDiscussionRounds: cfg.pipeline.maxDiscussionRounds, stallLimit: cfg.pipeline.stallLimit, costCapUsd: cfg.cost.capUsd, search: cfg.search.provider } });
 
   try {
@@ -324,7 +337,8 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
 
     const search = searchBackendFromConfig(cfg.search, opts.env, opts.mock);
     const shots = screenshotTool({ mock: opts.mock, outDir: path.join(outDir, "screenshots"), resolveInSandbox: (mid, rel) => sb.resolveInside(mid, rel), sandboxRootOf: (mid) => sb.sandboxDir(mid) });
-    const gate = { guard, interaction: { ask: (q: UserQuestion) => opts.interaction.ask(q) }, bus, destructivePatterns: cfg.safety.destructivePatterns, commandTimeoutMs: cfg.safety.commandTimeoutMs, vote, labelOf, idOfLabel, isolationFor };
+    const strict = isoKind.kind === "none";
+    const gate = { guard, interaction: { ask: (q: UserQuestion) => opts.interaction.ask(q) }, bus, destructivePatterns: cfg.safety.destructivePatterns, commandTimeoutMs: cfg.safety.commandTimeoutMs, vote, labelOf, idOfLabel, isolationFor, strict };
     const allTools: Record<string, ToolDefinition> = {};
     if (search) allTools.web_search = webSearchTool(search, cfg.search.maxResults);
     allTools.fetch_url = fetchUrlTool({ mock: opts.mock });
@@ -372,20 +386,37 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
     stage("plan");
     const wtList = [...workTypes.values()];
     const planRes = checkpoint.plan ? { json: { tasks: checkpoint.plan.tasks.map((t) => ({ ...t })), notes: checkpoint.plan.notes } as any } : await llm.callJson<Plan>({ member: lead, stage: "plan", system: P.planPrompt(lead.label, teamLabels(), wtList), messages: [textMessage("user", `Request: ${opts.request}\n\nSpec:\n${P.specText(spec)}`)], tag: "plan" }, (o) => (Array.isArray(o.tasks) && o.tasks.length ? undefined : "tasks must be a non-empty array"));
-    const plan: Plan = { tasks: [], notes: arr(planRes.json.notes) };
-    planRes.json.tasks.forEach((t: any, i: number) => {
-      const requested = String(t.workType ?? "");
-      let wtName = requested;
-      let note: string | undefined;
-      if (!workTypes.has(wtName)) {
-        wtName = closestWorkType(requested, t, workTypes);
-        note = `requested work type "${requested}" is not built; using "${wtName}" (limitation noted)`;
-        plan.notes.push(`Task ${t.id ?? i + 1}: ${note}`);
-      }
-      plan.tasks.push({ id: String(t.id ?? `t${i + 1}`), title: String(t.title ?? `Task ${i + 1}`), description: String(t.description ?? ""), workType: wtName, workTypeFallbackNote: note, acceptanceCriteria: arr(t.acceptanceCriteria), dependsOn: arr(t.dependsOn) });
-    });
+    const buildPlan = (json: any): Plan => {
+      const p: Plan = { tasks: [], notes: arr(json.notes) };
+      (json.tasks as any[]).forEach((t: any, i: number) => {
+        const requested = String(t.workType ?? "");
+        let wtName = requested;
+        let note: string | undefined;
+        if (!workTypes.has(wtName)) {
+          wtName = closestWorkType(requested, t, workTypes);
+          note = `requested work type "${requested}" is not built; using "${wtName}" (limitation noted)`;
+          p.notes.push(`Task ${t.id ?? i + 1}: ${note}`);
+        }
+        p.tasks.push({ id: String(t.id ?? `t${i + 1}`), title: String(t.title ?? `Task ${i + 1}`), description: String(t.description ?? ""), workType: wtName, workTypeFallbackNote: note, acceptanceCriteria: arr(t.acceptanceCriteria), dependsOn: arr(t.dependsOn) });
+      });
+      return p;
+    };
+    let plan: Plan = buildPlan(planRes.json);
     result.plan = plan;
     bus.emit("plan.written", { plan, resumed: !!checkpoint.plan }, { stage: "plan" });
+    // Human checkpoint: approve or amend the plan before any work starts.
+    if (!checkpoint.plan && reviewSet.has("plan") && !opts.autoAnswer) {
+      const a = await ask({ id: qid(), kind: "review-plan", text: "Review the plan. Answer \"ok\" to start, describe a change (e.g. \"split task 2 into UI and logic\"), or \"stop\".", tasks: plan.tasks.map((t) => ({ id: t.id, title: t.title, workType: t.workType, acceptanceCriteria: t.acceptanceCriteria })) });
+      const answer = a.text.trim();
+      if (/^stop\b/i.test(answer)) throw new RunStopped("stopped by the user at the plan review");
+      if (answer && !/^(ok|okay|yes|y|go|accept(ed)?|approve[d]?|looks good|lgtm)\.?$/i.test(answer)) {
+        const amended = await llm.callJson<Plan>({ member: lead, stage: "plan", system: P.planPrompt(lead.label, teamLabels(), wtList), messages: [textMessage("user", `Request: ${opts.request}\n\nSpec:\n${P.specText(spec)}\n\nYour current plan:\n${P.planText(plan.tasks)}\n\nThe user asks for this change to the plan: ${answer}\nReturn the complete revised plan.`)], tag: "plan-amend" }, (o) => (Array.isArray(o.tasks) && o.tasks.length ? undefined : "tasks must be a non-empty array"));
+        plan = buildPlan(amended.json);
+        plan.notes.push(`Amended at the user's request: ${answer}`);
+        result.plan = plan;
+        bus.emit("plan.written", { plan, amended: true, userAmendment: answer }, { stage: "plan" });
+      }
+    }
     if (!checkpoint.plan) {
       checkpoint.plan = plan;
       saveCheckpoint();
@@ -399,7 +430,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       const wt = task && workTypes.get(task.workType);
       if (!task || !wt) continue;
       const bestOk = d.bestSnapshotDir && fs.existsSync(d.bestSnapshotDir);
-      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map() };
+      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map(), userStop: false, extraAttempts: 0 };
       if (bestOk && d.bestTestRun) st.best = { version: d.bestVersion ?? 1, fromMemberId: "resumed", crownedAt: d.status, taskId: task.id, testRun: d.bestTestRun, snapshotDir: d.bestSnapshotDir!, reason: "resumed from checkpoint" };
       bus.emit("task.started", { task, resumed: true }, { taskId: task.id });
       bus.emit("task.finished", { taskId: task.id, status: d.status, summary: d.output.slice(0, 2000), resumed: true }, { taskId: task.id });
@@ -410,7 +441,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       if (done.some((d) => d.task.id === task.id)) continue;
       await control.gate();
       const wt = workTypes.get(task.workType)!;
-      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map() };
+      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map(), userStop: false, extraAttempts: 0 };
       bus.emit("task.started", { task }, { taskId: task.id });
       const priorWork = done.map((d) => `### ${d.task.title} (${d.wt.name})\n${d.output.slice(0, 6000)}`).join("\n\n");
       // Prior tasks' deliverables plus, once Step A is done, the current task's draft (the thing under review).
@@ -506,13 +537,15 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       }
 
       // ---- Step D: red team (code only, per work type)
-      if (wt.redTeam) {
+      if (wt.redTeam && !st.userStop) {
         stage("red-team", task.id);
         const attackers = live();
+        const plan = planRedTeam(attackers);
+        for (const note of plan.notes) bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: note, rationale: "" }, { stage: "red-team", taskId: task.id });
         await settle(attackers.map(async (att) => {
-          for (const target of attackers.filter((t) => t.id !== att.id)) {
+          for (const target of plan.targets.get(att.id) ?? []) {
             await control.gate();
-            const targetWork = wt.workspace === "sandbox" ? await sandboxDump(target.id) : (target.isLead ? st.leadOutput : st.verifications.find((v) => v.memberId === target.id)?.findings.map((f) => f.text).join("\n") ?? "(no work)");
+            const targetWork = wt.workspace === "sandbox" ? await redTeamContext(target.id) : (target.isLead ? st.leadOutput : st.verifications.find((v) => v.memberId === target.id)?.findings.map((f) => f.text).join("\n") ?? "(no work)");
             const targetRationale = target.isLead ? st.leadRationale : (discussion.turns.filter((t) => t.memberId === target.id).map((t) => t.rationale).join("\n") || "(none)");
             try {
               const { json, result: r } = await llm.callJson<any>({ member: att, stage: "red-team", taskId: task.id, system: sys(att, "redTeam", { ...common(att), target_label: target.label, target_rationale: targetRationale, target_work: targetWork }), messages: [textMessage("user", `Attack ${target.label}'s work and reasoning. Be harsh and specific.`)], tools: toolsFor(wt).filter((t) => ["read_other_sandbox", "read_file", "run_command", "web_search", "fetch_url"].includes(t.schema.name)), toolCtx: toolCtx(att, task.id, wt), tag: `red-team/${att.label}->${target.label}`, signal });
@@ -526,7 +559,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           }
         }));
         if (wt.workspace === "sandbox") {
-          const issues = st.critiques.flatMap((c) => c.issues.filter((i) => i.severity !== "minor").map((i) => `${labelOf(c.targetId)}: ${i.text}${i.location ? ` (${i.location})` : ""}`));
+          const issues = dedupeCritiques(st.critiques, labelOf).filter((i) => i.severity !== "minor").map((i) => i.line);
           await improveUntilCrowned("fix the red-team findings about your own work and adopt valid fixes seen in others' sandboxes", issues, "after red team");
         }
       }
@@ -534,7 +567,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       // ---- Step E: specialist verification with a code meeting first
       stage("meeting", task.id);
       const { verifier, mode } = chooseVerifier(wt, others(), task);
-      const proposed = [...st.agreedChanges, ...st.critiques.flatMap((c) => c.issues.filter((i) => i.severity === "critical" || i.severity === "major").map((i) => i.text))];
+      const proposed = [...st.agreedChanges, ...dedupeCritiques(st.critiques, labelOf).filter((i) => i.severity === "critical" || i.severity === "major").map((i) => i.line)];
       const proposedText = proposed.map((c) => `- ${c}`).join("\n") || "- (no changes proposed; verify as-is)";
       let agreedText = proposedText;
       if (wt.prompts.meeting) {
@@ -612,7 +645,10 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           fs.rmSync(dest, { recursive: true, force: true });
           fs.cpSync(finalDir, dest, { recursive: true, filter: (s) => !/node_modules|\.git$/.test(s) });
           result.outputs[task.id] = dest;
-          st.output = `${st.leadOutput}\n\nBest version v${st.best!.version} from ${labelOf(st.best!.fromMemberId)}: ${st.best!.testRun.passed}/${st.best!.testRun.results.length} tests passing. Files: ${sb.listFiles(st.best!.fromMemberId).map((f) => f.path).slice(0, 40).join(", ")}`;
+          st.output = `${st.leadOutput}\n\nBest version v${st.best!.version} from ${labelOf(st.best!.fromMemberId)}: ${st.best!.testRun.passed}/${st.best!.testRun.results.length} tests passing. Files by author: ${attributionSummary() || sb.listFiles(st.best!.fromMemberId).map((f) => f.path).slice(0, 40).join(", ")}`;
+          const tally = new Map<string, number>();
+          for (const a of st.attribution.values()) tally.set(a.fromMemberId, (tally.get(a.fromMemberId) ?? 0) + 1);
+          bus.emit("attribution.final", { taskId: task.id, version: st.best!.version, byMember: Object.fromEntries([...tally.entries()].map(([id, n]) => [id, { label: labelOf(id), files: n }])), files: [...st.attribution.values()] }, { stage: "compete", taskId: task.id });
         } else {
           st.output = `${st.leadOutput}\n\n(no version passed the test-based competition)`;
         }
@@ -636,6 +672,66 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
           return 0;
         }
       }
+      /**
+       * Who attacks whom. Identical sandboxes are attacked once (no paying N times to re-read the same code),
+       * an attacker skips versions identical to its own unless that is all there is, the current best's author
+       * comes first, and redTeamMaxTargets caps the rest (rotated per attacker so coverage spreads).
+       */
+      function planRedTeam(attackers: TeamMember[]): { targets: Map<string, TeamMember[]>; notes: string[] } {
+        const notes: string[] = [];
+        const targets = new Map<string, TeamMember[]>();
+        const hashOf = new Map<string, string>();
+        if (wt.workspace === "sandbox") for (const m of attackers) hashOf.set(m.id, sb.hashFiles(sb.sandboxDir(m.id), ["**"]));
+        const distinct = (list: TeamMember[]) => {
+          const seen = new Set<string>();
+          return list.filter((t) => {
+            const h = hashOf.get(t.id) ?? t.id;
+            if (seen.has(h)) return false;
+            seen.add(h);
+            return true;
+          });
+        };
+        const bestAuthor = st.best?.fromMemberId ?? lead.id;
+        attackers.forEach((att, idx) => {
+          let pool = attackers.filter((t) => t.id !== att.id);
+          if (wt.workspace === "sandbox") {
+            const notOwn = pool.filter((t) => hashOf.get(t.id) !== hashOf.get(att.id));
+            // Everyone holds the same code: attack it once, attributed to its author.
+            pool = notOwn.length ? distinct(notOwn) : attackers.filter((t) => t.id === bestAuthor && t.id !== att.id).concat(pool).slice(0, 1);
+          }
+          pool.sort((a, b) => (a.id === bestAuthor ? -1 : b.id === bestAuthor ? 1 : 0));
+          const rest = pool.slice(1);
+          const rotated = rest.slice(idx % Math.max(1, rest.length)).concat(rest.slice(0, idx % Math.max(1, rest.length)));
+          let chosen = pool.length ? [pool[0], ...rotated] : [];
+          const cap = cfg.pipeline.redTeamMaxTargets;
+          if (cap > 0 && chosen.length > cap) {
+            notes.push(`${att.label} red-teams ${cap} of ${chosen.length} distinct versions (redTeamMaxTargets); skipped: ${chosen.slice(cap).map((t) => t.label).join(", ")}.`);
+            chosen = chosen.slice(0, cap);
+          }
+          targets.set(att.id, chosen);
+        });
+        const total = [...targets.values()].reduce((n, l) => n + l.length, 0);
+        const full = attackers.length * (attackers.length - 1);
+        if (total < full) notes.push(`Red team: ${total} attack(s) instead of ${full}; identical versions are attacked once.`);
+        return { targets, notes };
+      }
+      /** What an attacker reads: the diff against the current best (the work under review), else the files themselves. */
+      async function redTeamContext(memberId: string): Promise<string> {
+        const listing = sb.listFiles(memberId).filter((f) => f.type === "file").map((f) => f.path).slice(0, 80).join("\n");
+        if (st.best && fs.existsSync(st.best.snapshotDir)) {
+          try {
+            const d = await sb.diff(st.best.snapshotDir, sb.sandboxDir(memberId));
+            if (d.files.length) {
+              const body = d.diff.length > 40_000 ? d.diff.slice(0, 40_000) + "\n…[diff truncated]" : d.diff;
+              return `Changes relative to the current best version v${st.best.version} (read unchanged files with read_other_sandbox if needed):\n${body}\n\nFiles:\n${listing}`;
+            }
+            return `This version is identical to the current best v${st.best.version}. Review the code itself:\n${await sandboxDump(memberId)}`;
+          } catch {
+            /* fall back to the files */
+          }
+        }
+        return await sandboxDump(memberId);
+      }
       async function sandboxDump(memberId: string): Promise<string> {
         const files = sb.listFiles(memberId).filter((f) => f.type === "file").slice(0, 30);
         const parts: string[] = [];
@@ -651,6 +747,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         return parts.join("\n") || "(empty sandbox)";
       }
       async function improveUntilCrowned(instruction: string, items: string[], when: string) {
+        if (st.userStop) return;
         // Nothing to change (the team accepted the work as-is): do not burn improvement rounds.
         if (!items.length) {
           bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: `No changes were agreed ${when}; skipping the improvement round.`, rationale: "" }, { stage: "compete", taskId: task.id });
@@ -658,7 +755,8 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         }
         // "Review continues" until a candidate beats the best, bounded by the stall limit.
         let extra: string[] = [];
-        for (let attempt = 1; attempt <= Math.max(1, cfg.pipeline.stallLimit); attempt++) {
+        for (let attempt = 1; attempt <= Math.max(1, cfg.pipeline.stallLimit + st.extraAttempts); attempt++) {
+          if (st.userStop) return;
           const changed = await improveAll(instruction, [...items, ...extra]);
           if (!changed) {
             bus.emit("chat.message", { channel: "system", round: attempt, memberId: "", label: "engine", message: `Improvement attempt ${attempt} ${when} changed no files; keeping v${st.best?.version ?? 0}.`, rationale: "" }, { stage: "compete", taskId: task.id });
@@ -671,14 +769,93 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         }
         bus.emit("best.stalled", { taskId: task.id, attempts: cfg.pipeline.stallLimit, reason: `no candidate beat the current best in ${cfg.pipeline.stallLimit} attempt(s) ${when}; keeping v${st.best?.version ?? 0}` }, { stage: "compete", taskId: task.id });
       }
+      /** Changed files in the newly crowned version are attributed to its author; unchanged files keep theirs. */
+      async function updateAttribution(prevSnap: string | undefined, snap: string, memberId: string, version: number): Promise<void> {
+        const now = new Set(sb.listFiles(memberId).filter((f) => f.type === "file").map((f) => f.path));
+        let changed: string[];
+        if (prevSnap && fs.existsSync(prevSnap)) {
+          try {
+            changed = (await sb.diff(prevSnap, snap)).files;
+          } catch {
+            changed = [...now];
+          }
+        } else {
+          changed = [...now];
+        }
+        for (const p of changed) if (now.has(p)) st.attribution.set(p, { path: p, fromMemberId: memberId, sinceVersion: version });
+        for (const p of [...st.attribution.keys()]) if (!now.has(p)) st.attribution.delete(p);
+        for (const p of now) if (!st.attribution.has(p)) st.attribution.set(p, { path: p, fromMemberId: memberId, sinceVersion: version });
+      }
+      /** "src/ (Agent A), tests/ (Agent C)": the top-level folders and files of the best, grouped by who wrote them. */
+      function attributionSummary(): string {
+        const byTop = new Map<string, Map<string, number>>();
+        for (const a of st.attribution.values()) {
+          const top = a.path.includes("/") ? a.path.split("/")[0] + "/" : a.path;
+          const m = byTop.get(top) ?? new Map<string, number>();
+          m.set(a.fromMemberId, (m.get(a.fromMemberId) ?? 0) + 1);
+          byTop.set(top, m);
+        }
+        return [...byTop.entries()].map(([top, m]) => `${top} (${[...m.entries()].sort((x, y) => y[1] - x[1]).map(([id, n]) => `${labelOf(id)}${m.size > 1 ? ` ${n}` : ""}`).join(", ")})`).join(", ");
+      }
+      /** Save each non-best version's diff (on disk and as a prompt excerpt) before sandboxes are reset. */
+      async function harvestLosers(members: TeamMember[]): Promise<{ memberId: string; label: string; files: string[]; excerpt: string }[]> {
+        if (!st.best || !fs.existsSync(st.best.snapshotDir)) return [];
+        const out: { memberId: string; label: string; files: string[]; excerpt: string }[] = [];
+        let budget = 20_000;
+        for (const m of members) {
+          if (m.id === st.best.fromMemberId) continue;
+          let d: { files: string[]; diff: string };
+          try {
+            d = await sb.diff(st.best.snapshotDir, sb.sandboxDir(m.id));
+          } catch {
+            continue;
+          }
+          if (!d.files.length) continue;
+          const dir = path.join(workspaceRoot, runId, "harvest", task.id, `r${st.improveRounds}-${m.id}`);
+          try {
+            fs.mkdirSync(path.dirname(dir), { recursive: true });
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.cpSync(sb.sandboxDir(m.id), dir, { recursive: true, filter: (p) => !/[\\/](node_modules|\.git)([\\/]|$)/.test(p) });
+          } catch {
+            /* the diff in the event log is still kept */
+          }
+          const excerpt = d.diff.slice(0, Math.min(6000, Math.max(0, budget)));
+          budget -= excerpt.length;
+          out.push({ memberId: m.id, label: m.label, files: d.files, excerpt: excerpt + (d.diff.length > excerpt.length ? "\n…[diff truncated]" : "") });
+          bus.emit("harvest.saved", { memberId: m.id, files: d.files, dir: `<workspace>/harvest/${task.id}/r${st.improveRounds}-${m.id}`, round: st.improveRounds }, { stage: "do", taskId: task.id, memberId: m.id });
+        }
+        return out;
+      }
+      /** Rotate the wildcard over members that are not the best's author, preferring ones with a distinct version. */
+      function pickWildcard(members: TeamMember[], divergent: string[]): TeamMember | undefined {
+        const pool = members.filter((m) => m.id !== st.best?.fromMemberId);
+        if (!pool.length) return undefined;
+        const preferred = pool.filter((m) => divergent.includes(m.id));
+        const list = preferred.length ? preferred : pool;
+        return list[(st.improveRounds - 1) % list.length];
+      }
       /** Runs an improvement round for every live member; returns whether any sandbox actually changed. */
       async function improveAll(instruction: string, items: string[]): Promise<boolean> {
-        // Everyone starts the improvement round from the crowned best (or the lead's work when nothing is crowned yet).
-        if (st.best) sb.resetAllToBest(live().map((m) => m.id));
+        st.improveRounds++;
+        const members = live();
+        // Keep what the losing versions tried before they are overwritten (idea: harvest before reset).
+        const harvested = st.best && cfg.pipeline.harvest ? await harvestLosers(members) : [];
+        // One member keeps its own lineage so the team does not collapse onto a single design (wildcard).
+        const wildcard = st.best && cfg.pipeline.wildcard && members.length >= 3 ? pickWildcard(members, harvested.map((h) => h.memberId)) : undefined;
+        // Everyone else starts the improvement round from the crowned best (or the lead's work when nothing is crowned yet).
+        if (st.best) sb.resetAllToBest(members.filter((m) => m.id !== wildcard?.id).map((m) => m.id));
+        if (wildcard) bus.emit("chat.message", { channel: "system", round: st.improveRounds, memberId: wildcard.id, label: "engine", message: `${wildcard.label} is this round's wildcard: it keeps its own version instead of being reset to v${st.best?.version}.`, rationale: "" }, { stage: "do", taskId: task.id });
+        const harvestText = harvested.length
+          ? `\nUnadopted work from the previous round (other agents' versions that were not crowned; adopt any part that helps, tests decide):\n${harvested.map((h) => `- ${h.label} changed ${h.files.slice(0, 12).join(", ")}${h.files.length > 12 ? " …" : ""}:\n${h.excerpt}`).join("\n")}`
+          : "";
         let anyChanged = false;
-        await settle(live().map(async (m) => {
+        await settle(members.map(async (m) => {
+          const holds = m.id === wildcard?.id
+            ? `your own version from the previous round (you are the wildcard: continue your own approach or converge on the best v${st.best?.version}, your call)`
+            : st.best ? `the current best version v${st.best.version}` : `a copy of ${lead.label}'s work`;
+          const others = harvestText && harvested.some((h) => h.memberId !== m.id) ? harvestText : "";
           try {
-            const { json, result: r } = await llm.callJson<any>({ member: m, stage: "do", taskId: task.id, system: sys(m, "do", common(m, `IMPROVEMENT ROUND. Your sandbox currently holds ${st.best ? `the current best version v${st.best.version}` : `a copy of ${lead.label}'s work`}. Instruction: ${instruction}.\nItems:\n${items.map((i) => `- ${i}`).join("\n") || "- (use your own judgement)"}\nKeep or add tests so improvements are measurable. Do not remove passing tests.`)), messages: [textMessage("user", "Improve your version now.")], tools: toolsFor(wt), toolCtx: toolCtx(m, task.id, wt), tag: `improve/${m.label}`, signal });
+            const { json, result: r } = await llm.callJson<any>({ member: m, stage: "do", taskId: task.id, system: sys(m, "do", common(m, `IMPROVEMENT ROUND. Your sandbox currently holds ${holds}.${others} Instruction: ${instruction}.\nItems:\n${items.map((i) => `- ${i}`).join("\n") || "- (use your own judgement)"}\nKeep or add tests so improvements are measurable. Do not remove passing tests.${st.flaky.size ? `\nFlaky tests (their result changes between identical runs, so they are ignored when crowning; fixing them is worthwhile): ${[...st.flaky].slice(0, 20).join("; ")}` : ""}`)), messages: [textMessage("user", "Improve your version now.")], tools: toolsFor(wt), toolCtx: toolCtx(m, task.id, wt), tag: `improve/${m.label}`, signal });
             bus.emit("chat.message", { channel: "lead", round: st.version + 1, memberId: m.id, label: m.label, message: `Improvement: ${json.summary ?? ""}`, rationale: String(json.rationale ?? ""), reasoningText: r.reasoningText, filesChanged: json.files_changed }, { stage: "do", taskId: task.id, memberId: m.id });
             if ((await emitDiff(m)) > 0) anyChanged = true;
           } catch (e) {
@@ -692,7 +869,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         const hash = sb.hashFiles(dir, suite.suitePatterns);
         // A member can put anything in package.json "test"; treat the resolved script like any other command.
         const script = resolvedTestScript(dir, suite.command);
-        const dc = needsConfirmation(script, dir, dir, cfg.safety.destructivePatterns);
+        const dc = needsConfirmation(script, dir, dir, cfg.safety.destructivePatterns, strict);
         const g = guard.check({ command: script, cwd: dir, timeoutMs: cfg.safety.commandTimeoutMs });
         if (dc.needed || g.decision === "block") {
           const reason = dc.needed ? `test command reaches outside the sandbox (${dc.classification.reason})` : `resource guard: ${g.reason}`;
@@ -704,46 +881,86 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         bus.emit("command.run", { memberId, command: suite.command, cwd: dir, exitCode: res.exitCode, timedOut: res.timedOut, killedReason: res.killedReason, durationMs: res.durationMs }, { stage: "compete", taskId: task.id, memberId });
         return makeTestRun(suite.command, hash, res, parseTestOutput(suite.kind, res));
       }
+      /** The current best measured on `suite` as it exists in `memberId`'s sandbox (fairness re-run when the suite changed). */
+      async function bestOnSuiteOf(memberId: string, suite: NonNullable<ReturnType<typeof detectTestCommand>>, force = false): Promise<TestRun | undefined> {
+        if (!st.best || !st.bestRun) return undefined;
+        const candHash = sb.hashFiles(sb.sandboxDir(memberId), suite.suitePatterns);
+        if (!force && candHash === st.bestRun.suiteHash) return st.bestRun;
+        // Each candidate gets its own re-run sandbox, so parallel measurements never collide.
+        const bestTmp = `best-rerun-${memberId}`;
+        sb.reseed(bestTmp, st.best.snapshotDir);
+        if (candHash !== st.bestRun.suiteHash) {
+          for (const f of sb.listFiles(memberId).filter((f) => f.type === "file" && suite.suitePatterns.some((p) => globMatch(p, f.path)))) {
+            try { sb.writeFile(bestTmp, f.path, sb.readFileFrom(memberId, f.path)); } catch { /* ignore */ }
+          }
+        }
+        const rerunHash = sb.hashFiles(sb.sandboxDir(bestTmp), suite.suitePatterns);
+        if (!force) {
+          const cached = st.rerunCache.get(rerunHash);
+          if (cached) return cached;
+        }
+        const rerun = await runTests(bestTmp, suite);
+        if (!force) st.rerunCache.set(rerunHash, rerun);
+        bus.emit("tests.run", { memberId: st.best.fromMemberId, testRun: rerun, candidate: false, note: force ? "current best re-run to check for flaky tests" : "current best re-run on the updated test suite" }, { stage: "compete", taskId: task.id, memberId: st.best.fromMemberId });
+        return rerun;
+      }
       async function compete(when: string) {
         stage("compete", task.id);
         if (wt.scoring.type !== "tests") return;
+        const testCommand = wt.scoring.command;
         let crownedThisRound = false;
-        for (const m of live()) {
+        const candidates = live();
+        // 1. Measure: every candidate's suite runs in its own sandbox; in parallel unless configured otherwise.
+        const measureOne = async (m: TeamMember) => {
           await control.gate();
-          const dir = sb.sandboxDir(m.id);
-          const suite = detectTestCommand(dir, wt.scoring.command);
-          if (!suite) {
+          const suite = detectTestCommand(sb.sandboxDir(m.id), testCommand);
+          if (!suite) return { m, suite: undefined, run: undefined };
+          const run = await runTests(m.id, suite);
+          bus.emit("tests.run", { memberId: m.id, testRun: run, candidate: true }, { stage: "compete", taskId: task.id, memberId: m.id });
+          return { m, suite, run };
+        };
+        const measured = cfg.pipeline.parallelTests ? await settle(candidates.map(measureOne)) : await (async () => { const out = []; for (const m of candidates) out.push(await measureOne(m)); return out; })();
+        // 2. Decide: serially, in a fixed order, against whatever is the best at that moment.
+        for (const { m, suite, run } of measured) {
+          await control.gate();
+          if (!suite || !run) {
             bus.emit("best.rejected", { memberId: m.id, reason: "no test suite detected in the candidate", testRun: null }, { stage: "compete", taskId: task.id, memberId: m.id });
             continue;
           }
-          const candRun = await runTests(m.id, suite);
-          bus.emit("tests.run", { memberId: m.id, testRun: candRun, candidate: true }, { stage: "compete", taskId: task.id, memberId: m.id });
-          let bestForCompare = st.bestRun;
-          // Fairness: if the suite changed, re-run the current best on the new suite.
-          if (st.best && st.bestRun && candRun.suiteHash !== st.bestRun.suiteHash) {
-            const bestTmp = "best-rerun";
-            sb.reseed(bestTmp, st.best.snapshotDir);
-            for (const f of sb.listFiles(m.id).filter((f) => f.type === "file" && suite.suitePatterns.some((p) => globMatch(p, f.path)))) {
-              try { sb.writeFile(bestTmp, f.path, sb.readFileFrom(m.id, f.path)); } catch { /* ignore */ }
-            }
-            const rerunHash = sb.hashFiles(sb.sandboxDir(bestTmp), suite.suitePatterns);
-            let rerun = st.rerunCache.get(rerunHash);
-            if (!rerun) {
-              rerun = await runTests(bestTmp, suite);
-              st.rerunCache.set(rerunHash, rerun);
-              bus.emit("tests.run", { memberId: st.best.fromMemberId, testRun: rerun, candidate: false, note: "current best re-run on the updated test suite" }, { stage: "compete", taskId: task.id, memberId: st.best.fromMemberId });
-            }
-            bestForCompare = rerun;
+          const bestNow = await bestOnSuiteOf(m.id, suite);
+          const slow = Math.max(run.durationMs ?? 0, bestNow?.durationMs ?? 0) > cfg.pipeline.flakeRerunMaxSec * 1000;
+          const cmp = await decideWithFlakeCheck(bestNow, run, {
+            knownFlaky: st.flaky,
+            allowRerun: cfg.pipeline.flakeRerun && !slow,
+            rerun: async () => ({ cand: await runTests(m.id, suite), best: await bestOnSuiteOf(m.id, suite, true) }),
+          });
+          if (cmp.newlyFlaky.length) {
+            for (const f of cmp.newlyFlaky) st.flaky.add(f);
+            bus.emit("tests.flaky", { memberId: m.id, tests: cmp.newlyFlaky, note: "these tests changed result between identical runs and are ignored when crowning" }, { stage: "compete", taskId: task.id, memberId: m.id });
           }
-          const cmp = compareRuns(bestForCompare, candRun);
+          const candRun = cmp.cand;
           if (cmp.crown) {
+            const prevSnap = st.best?.snapshotDir;
             st.version++;
             const snap = sb.snapshot(m.id, st.version);
             sb.promoteToBest(m.id);
-            st.best = { version: st.version, fromMemberId: m.id, crownedAt: new Date().toISOString(), taskId: task.id, testRun: candRun, snapshotDir: snap, reason: `${when}: ${cmp.reason}` };
+            await updateAttribution(prevSnap, snap, m.id, st.version);
+            st.best = { version: st.version, fromMemberId: m.id, crownedAt: new Date().toISOString(), taskId: task.id, testRun: candRun, snapshotDir: snap, reason: `${when}: ${cmp.reason}`, attribution: [...st.attribution.values()] };
             st.bestRun = candRun;
+            st.rerunCache.clear(); // later candidates compare against the new best
             crownedThisRound = true;
             bus.emit("best.crowned", { best: st.best, label: m.label }, { stage: "compete", taskId: task.id, memberId: m.id });
+            if (reviewSet.has("crown") && !opts.autoAnswer) {
+              const changedFiles = [...st.attribution.values()].filter((x) => x.sinceVersion === st.version).length;
+              const a = await ask({ id: qid(), kind: "review-crown", text: `${m.label}'s version was crowned as v${st.version} (${cmp.reason}). Accept and continue, keep improving, or stop improving this task here?`, taskId: task.id, version: st.version, label: m.label, reason: cmp.reason, changedFiles }, { taskId: task.id });
+              const choice = a.text.trim().toLowerCase();
+              if (choice.startsWith("stop")) {
+                st.userStop = true;
+                bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: `You chose to stop improving this task at v${st.version}; it continues to verification with this version.`, rationale: "" }, { stage: "compete", taskId: task.id });
+                break;
+              }
+              if (choice.startsWith("keep")) st.extraAttempts++;
+            }
           } else {
             bus.emit("best.rejected", { memberId: m.id, reason: cmp.reason, testRun: candRun }, { stage: "compete", taskId: task.id, memberId: m.id });
           }
@@ -784,6 +1001,28 @@ async function settle<T>(ps: Promise<T>[]): Promise<T[]> {
   const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
   if (failed) throw failed.reason;
   return results.map((r) => (r as PromiseFulfilledResult<T>).value);
+}
+
+/** Merge findings several attackers reported about the same target; the most-reported and most severe come first. */
+export function dedupeCritiques(critiques: RedTeamCritique[], labelOf: (id: string) => string): { line: string; severity: string; count: number }[] {
+  const sevRank: Record<string, number> = { critical: 0, major: 1, minor: 2 };
+  const groups = new Map<string, { text: string; location?: string; severity: string; targetId: string; attackers: Set<string> }>();
+  for (const c of critiques) {
+    for (const i of c.issues) {
+      const norm = String(i.text).toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim().split(" ").slice(0, 8).join(" ");
+      const key = `${c.targetId}|${(i.location ?? "").toLowerCase().split(/[:\s(]/)[0]}|${norm}`;
+      const g = groups.get(key);
+      if (g) {
+        g.attackers.add(c.attackerId);
+        if ((sevRank[i.severity] ?? 3) < (sevRank[g.severity] ?? 3)) g.severity = i.severity;
+      } else {
+        groups.set(key, { text: i.text, location: i.location, severity: i.severity, targetId: c.targetId, attackers: new Set([c.attackerId]) });
+      }
+    }
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.attackers.size - a.attackers.size || (sevRank[a.severity] ?? 3) - (sevRank[b.severity] ?? 3))
+    .map((g) => ({ line: `${labelOf(g.targetId)}: ${g.text}${g.location ? ` (${g.location})` : ""}${g.attackers.size > 1 ? ` [found by ${g.attackers.size} agents]` : ""}`, severity: g.severity, count: g.attackers.size }));
 }
 
 function rubricRun(criteria: string[], findings: string): TestRun {

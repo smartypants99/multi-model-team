@@ -7,6 +7,7 @@
  */
 import fs from "node:fs";
 import http from "node:http";
+import crypto from "node:crypto";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ToolDefinition, ContentPart } from "../core/types.js";
@@ -21,10 +22,16 @@ const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js
  */
 export async function serveDirectory(root: string): Promise<{ origin: string; close: () => Promise<void> }> {
   const base = path.resolve(root);
+  // Unguessable prefix: other local processes cannot browse the sandbox during the capture window.
+  const prefix = "/" + crypto.randomBytes(12).toString("hex");
   const server = http.createServer((req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
-      let rel = decodeURIComponent(url.pathname);
+      if (!url.pathname.startsWith(prefix + "/") && url.pathname !== prefix) {
+        res.writeHead(404).end("not found");
+        return;
+      }
+      let rel = decodeURIComponent(url.pathname.slice(prefix.length) || "/");
       if (rel.endsWith("/")) rel += "index.html";
       const target = path.resolve(base, "." + rel);
       if (target !== base && !target.startsWith(base + path.sep)) {
@@ -46,7 +53,7 @@ export async function serveDirectory(root: string): Promise<{ origin: string; cl
     server.listen(0, "127.0.0.1", () => resolve());
   });
   const port = (server.address() as AddressInfo).port;
-  return { origin: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(() => r())) };
+  return { origin: `http://127.0.0.1:${port}${prefix}`, close: () => new Promise((r) => server.close(() => r())) };
 }
 
 export interface ScreenshotOptions {

@@ -256,8 +256,15 @@ Per task:
 - **B independent verification.** Every other member runs `verify` in parallel
   (`Promise.allSettled`), each seeing only the lead's work, never each other.
 - **C group discussion.** See §9.
-- **D red team.** Only if `worktype.redTeam`. Every member attacks every other
-  member's work and rationale (N×(N−1) calls, in parallel per attacker).
+- **D red team.** Only if `worktype.redTeam`. Every member attacks the other
+  members' versions and rationales, in parallel per attacker. Attackers read
+  the **diff against the current best** (the work under review) rather than
+  whole files, falling back to the files when nothing is crowned yet.
+  Identical versions are attacked once instead of N times, an attacker skips
+  a version identical to its own, and `pipeline.redTeamMaxTargets` can cap
+  targets per attacker (the best's author first, the rest rotated). Findings
+  several attackers report about the same target are merged and ranked by how
+  many agents found them before they feed the improvement round and meeting.
 - **E specialist verification.** Verifier chosen by `worktype.verifier.prefer`
   against team capabilities (§10). First a *meeting* where every member votes
   on the proposed changes (same rules as the discussion, `maxMeetingRounds`);
@@ -349,6 +356,30 @@ independent.
   scores are recorded but never override tests.
 - **Stall limit.** After `stallLimit` consecutive rounds with no new best,
   keep the current best, log why, move on.
+- **Harvest and wildcard.** Before sandboxes are reset to the best for an
+  improvement round, every version that differs from the best is copied to
+  `<workspace>/harvest/<task>/r<n>-<member>` and its diff is shown in the next
+  improvement prompt as "unadopted work", so good ideas in losing versions are
+  not destroyed. With three or more members, one member per round (rotating,
+  never the best's author, preferring divergent versions) keeps its own
+  lineage instead of being reset, which preserves diversity; its candidate
+  still has to win the competition like any other. Both are on by default
+  (`pipeline.harvest`, `pipeline.wildcard`).
+- **Attribution.** Each crowned version records which member each file came
+  from and since which version (changed files go to the new version's author,
+  unchanged files keep theirs). It appears in the dashboard, `best/history.json`
+  and the task summary ("src/ (Agent A), tests/ (Agent C)"), and an
+  `attribution.final` event tallies files per member. It is display-only and
+  never fed back into prompts as a judgement of who is better.
+- **Measurement and flakes.** All candidates' suites are measured in
+  parallel (each in its own sandbox; the best's fairness re-runs use a
+  per-candidate copy), then crowns are decided serially in a fixed order
+  against whatever is the best at that moment, so the outcome does not depend
+  on which suite finishes first. When a candidate and the best disagree on a
+  test, both are run once more; a test whose result changes between identical
+  runs is marked flaky, ignored for crowning from then on, and listed in the
+  improvement prompt. vitest projects run through `--reporter=tap-flat` so
+  results are per test, not one coarse pass/fail.
 - The crowned version is copied to `best/`, snapshotted to `history/vN/`
   with its `TestRun`, and copied into every sandbox as the new start.
 
@@ -383,8 +414,13 @@ independent.
   `.env` files, `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, keychains and
   browser profiles are unreadable; the network stays open so installs and
   searches work. Hosts without a mechanism (Windows, Linux without bwrap)
-  fall back to the classifier plus confirmation, and `mmt doctor` and the
-  run log say so plainly. `safety.osSandbox: "off"` disables it;
+  fall back to a **strict** classifier: any reference outside the sandbox,
+  any construct a regex cannot see through (variable expansion, command
+  substitution, `eval`, `sh -c`, inline `python -c`/`node -e`, `xargs`,
+  `find -exec/-delete`, heredocs) and any exfiltration or persistence
+  command (`curl -d`, `nc`, `ssh`, `crontab`, `launchctl`, `| sh`, …)
+  needs the user's confirmation. That costs more prompts on such hosts, by
+  design. `mmt doctor` and the run log say which mode is active. `safety.osSandbox: "off"` disables it;
   `safety.sandboxWriteAllow` / `sandboxReadDeny` extend the sets.
 - **Redaction.** Every log line and UI payload passes through a redactor
   seeded with the real key values plus generic key patterns.
@@ -460,6 +496,16 @@ is pending; `mmt answer` posts to the same API. Status is derived purely from
 the event stream, so it works identically for live runs and for finished runs
 read from `events.jsonl`. The Claude Code skill loops on wait/ask/answer.
 
+## 14b2. Human review checkpoints
+
+`--review plan,crown` arms two optional questions, answered from the
+terminal, the dashboard or `mmt answer`. **plan**: after the plan is written
+you can start, describe a change (the lead rewrites the plan with it, and the
+amendment is logged), or stop. **crown**: after each crowned version you can
+accept, grant one more improvement attempt, or stop improving that task (its
+red team and further improvement rounds are skipped; specialist verification
+still runs). `--yes` skips both, and unattended runs answer "ok"/"accept".
+
 ## 14c. Checkpoints and resume
 
 Real runs are expensive and long, so the orchestrator writes
@@ -501,6 +547,10 @@ services on 2026-09-26:
   $0.41 (tiny library, red team found real gaps, v2 crowned) and $0.30
   (web app with screenshots).
 
+- Strict classification on a Linux host without bwrap (the user's server):
+  the suite passes with the OS-sandbox enforcement test skipped, the mock
+  demo completes with no confirmation prompts, and `mmt doctor` reports
+  "OS sandbox: none" with the reason.
 - The Claude Code plugin itself: `claude -p --plugin-dir .` with the
   `/multi-model-team:team` skill started a detached mock run, polled it with
   `wait`, and summarised outputs, logs, cost and the remaining dissent in four
