@@ -164,6 +164,7 @@ node dist/cli/main.js wait <runId>   # block until finished or a question is pen
 node dist/cli/main.js answer <runId> <questionId> "text"
 node dist/cli/main.js stop <runId>   # also pause / resume
 node dist/cli/main.js run --resume <runId>   # continue an interrupted run; finished tasks are not redone
+node dist/cli/main.js run --request "..." --review plan,crown   # approve/amend the plan, accept or stop at each crowned version
 node dist/cli/main.js --help
 ```
 

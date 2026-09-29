@@ -818,6 +818,23 @@
           el("button", { class: "btn btn-danger", onclick: (ev) => submit({ text: "deny", approved: false }, ev.currentTarget) }, "Deny")));
         break;
       }
+      case "review-plan": {
+        form.append(el("ol", null, (q.tasks || []).map((t) => el("li", null, el("span", { class: "chip" }, text(t.workType)), " ", text(t.title), (t.acceptanceCriteria || []).length ? el("div", { class: "faint" }, text(t.acceptanceCriteria.join("; "))) : null))));
+        const ta = el("textarea", { placeholder: "Optional: describe a change to the plan" });
+        form.append(ta, el("div", { class: "row" },
+          el("button", { class: "btn btn-pass", onclick: (ev) => submit({ text: "ok" }, ev.currentTarget) }, "Start with this plan"),
+          el("button", { class: "btn btn-primary", onclick: (ev) => ta.value.trim() && submit({ text: ta.value.trim() }, ev.currentTarget) }, "Amend the plan"),
+          el("button", { class: "btn btn-danger", onclick: (ev) => submit({ text: "stop" }, ev.currentTarget) }, "Stop")));
+        break;
+      }
+      case "review-crown": {
+        form.append(el("div", { class: "muted" }, `${q.changedFiles} file(s) changed in v${q.version}. ${text(q.reason || "")}`));
+        form.append(el("div", { class: "row" },
+          el("button", { class: "btn btn-pass", onclick: (ev) => submit({ text: "accept" }, ev.currentTarget) }, "Accept and continue"),
+          el("button", { class: "btn btn-primary", onclick: (ev) => submit({ text: "keep improving" }, ev.currentTarget) }, "Keep improving"),
+          el("button", { class: "btn btn-danger", onclick: (ev) => submit({ text: "stop here" }, ev.currentTarget) }, "Stop improving here")));
+        break;
+      }
       case "cost-cap": {
         form.append(el("div", { class: "muted" }, `Spent ${fmtUsd(q.spentUsd)} of the ${fmtUsd(q.capUsd)} cap.`));
         form.append(el("div", { class: "row" },

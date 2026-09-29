@@ -49,6 +49,7 @@ const HELP = `mmt — multi-model team
 Commands:
   run --request "<text>" [--mock] [--out <dir>] [--no-ui] [--yes] [--detach] [--model ep=model[:level]]... [--reselect] [--cost-cap <usd>]
   run --resume <runId>      continue an interrupted run from its checkpoint (skips completed tasks)
+  run ... --review plan,crown   pause for you to approve/amend the plan and to accept/stop at each crowned version
   demo                      run the offline mock demo (same as npm run demo)
   status <runId>            status + pending questions as JSON
   wait <runId> [--timeout-sec N]   block until finished or a question is pending
@@ -151,7 +152,7 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   if (args.flags.detach) {
     // Spawn a child that hosts the run + dashboard, then print its control info.
     const runId = newRunId();
-    const childArgs = [fileURLToPath(import.meta.url), "run", "--serve-child", "--run-id", runId, "--request", request, ...(mock ? ["--mock"] : []), ...(typeof args.flags.resume === "string" ? ["--resume", args.flags.resume] : []), ...(outDir ? ["--out", outDir] : []), ...(args.flags.yes ? ["--yes"] : []), ...(args.flags.reselect ? ["--reselect"] : []), ...(Array.isArray(args.flags.model) ? args.flags.model.flatMap((m) => ["--model", m]) : []), ...(typeof args.flags["cost-cap"] === "string" ? ["--cost-cap", args.flags["cost-cap"]] : []), ...(typeof args.flags.config === "string" ? ["--config", args.flags.config] : [])];
+    const childArgs = [fileURLToPath(import.meta.url), "run", "--serve-child", "--run-id", runId, "--request", request, ...(mock ? ["--mock"] : []), ...(typeof args.flags.resume === "string" ? ["--resume", args.flags.resume] : []), ...(outDir ? ["--out", outDir] : []), ...(args.flags.yes ? ["--yes"] : []), ...(args.flags.reselect ? ["--reselect"] : []), ...(Array.isArray(args.flags.model) ? args.flags.model.flatMap((m) => ["--model", m]) : []), ...(typeof args.flags["cost-cap"] === "string" ? ["--cost-cap", args.flags["cost-cap"]] : []), ...(typeof args.flags.config === "string" ? ["--config", args.flags.config] : []), ...(typeof args.flags.review === "string" ? ["--review", args.flags.review] : [])];
     const logFile = path.join(engine.runsRoot, `${runId}.child.log`);
     const fd = fs.openSync(logFile, "a");
     const child = spawn(process.execPath, childArgs, { detached: true, stdio: ["ignore", fd, fd], windowsHide: true, env: process.env });
@@ -185,7 +186,8 @@ async function cmdRun(loaded: ReturnType<typeof loadConfig>, args: Args, mock: b
   // Plain CLI runs answer on the terminal. A detached child has no terminal: its questions wait for the dashboard/CLI,
   // unless MMT_UNATTENDED=1 asks for the safe automatic answers.
   const terminal = isChild ? (process.env.MMT_UNATTENDED === "1" ? { ask: async (q: UserQuestion) => unattendedAnswer(q) } : undefined) : terminalInteraction();
-  const live = engine.startRun({ request, mock, outDir, overrides, autoAnswer: !!args.flags.yes, reselect: !!args.flags.reselect, runId, terminal, resumeFrom });
+  const review = typeof args.flags.review === "string" ? (args.flags.review.split(",").map((s) => s.trim()).filter((s) => s === "plan" || s === "crown") as ("plan" | "crown")[]) : undefined;
+  const live = engine.startRun({ request, mock, outDir, overrides, autoAnswer: !!args.flags.yes, reselect: !!args.flags.reselect, runId, terminal, resumeFrom, review });
   if (isChild) armChildLifetime(Number(process.env.MMT_DETACHED_MAX_HOURS ?? 12), () => { engine.control(live.runId, "stop"); setTimeout(() => process.exit(0), 5000).unref(); });
   const dashboard = server ? `${server.url()}?t=${engine.token}#/run/${live.runId}` : undefined;
   engine.writeControlFile(live.runId, { dashboard, port: server?.port(), token: server ? engine.token : undefined });

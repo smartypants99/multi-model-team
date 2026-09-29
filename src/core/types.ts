@@ -420,6 +420,8 @@ export type UserQuestion =
   | { id: string; kind: "select-model"; endpointId: string; text: string; models: ModelInfo[] }
   | { id: string; kind: "confirm-destructive"; text: string; command: string; cwd: string }
   | { id: string; kind: "cost-cap"; text: string; spentUsd: number; capUsd: number }
+  | { id: string; kind: "review-plan"; text: string; tasks: { id: string; title: string; workType: string; acceptanceCriteria: string[] }[] }
+  | { id: string; kind: "review-crown"; text: string; taskId: string; version: number; label: string; reason: string; changedFiles: number }
   | { id: string; kind: "resource-block"; text: string; command: string; estimate: ResourceEstimate };
 
 export interface UserAnswer {

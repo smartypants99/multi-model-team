@@ -496,6 +496,16 @@ is pending; `mmt answer` posts to the same API. Status is derived purely from
 the event stream, so it works identically for live runs and for finished runs
 read from `events.jsonl`. The Claude Code skill loops on wait/ask/answer.
 
+## 14b2. Human review checkpoints
+
+`--review plan,crown` arms two optional questions, answered from the
+terminal, the dashboard or `mmt answer`. **plan**: after the plan is written
+you can start, describe a change (the lead rewrites the plan with it, and the
+amendment is logged), or stop. **crown**: after each crowned version you can
+accept, grant one more improvement attempt, or stop improving that task (its
+red team and further improvement rounds are skipped; specialist verification
+still runs). `--yes` skips both, and unattended runs answer "ok"/"accept".
+
 ## 14c. Checkpoints and resume
 
 Real runs are expensive and long, so the orchestrator writes

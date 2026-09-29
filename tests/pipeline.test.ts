@@ -189,3 +189,46 @@ describe("resume from checkpoint", () => {
     expect(Object.keys(r2.outputs).sort()).toEqual(["t1", "t2"]);
   }, 300_000);
 });
+
+describe("human checkpoints (--review plan,crown)", () => {
+  it("lets the user amend the plan and stop improving at a crown", async () => {
+    const asked: UserQuestion[] = [];
+    const inter: Interaction = {
+      ask: async (q) => {
+        asked.push(q);
+        if (q.kind === "review-plan") return { questionId: q.id, text: "please keep it to the game only" };
+        if (q.kind === "review-crown") return { questionId: q.id, text: "stop here" };
+        return { questionId: q.id, text: "auto", approved: true, data: { mode: "auto" } };
+      },
+    };
+    const bus = new EventBus("review-1");
+    const r = await runPipeline({ request: "research the top pen brands and make a game with better pens being bosses", config: cfg(), env: {}, mock: true, interaction: inter, outDir: path.join(tmp, "run-review"), workspaceRoot: path.join(tmp, "ws-review"), bus, runId: "review-1", review: ["plan", "crown"] });
+    expect(r.status, r.error).toBe("ok");
+    const ev = bus.all();
+    expect(asked.some((q) => q.kind === "review-plan")).toBe(true);
+    const plans = ev.filter((e) => e.type === "plan.written");
+    expect(plans.length).toBe(2);
+    expect(plans[1].data.amended).toBe(true);
+    expect(plans[1].data.userAmendment).toBe("please keep it to the game only");
+    expect(llmTags(ev)).toContain("plan-amend");
+    // Stopping at the first crown of the coding task skips its red team and improvement rounds.
+    const crownQs = asked.filter((q) => q.kind === "review-crown");
+    expect(crownQs.length).toBeGreaterThan(0);
+    const t2 = ev.filter((e) => e.taskId === "t2");
+    expect(t2.some((e) => e.type === "run.stage" && e.data.stage === "red-team")).toBe(false);
+    expect(t2.some((e) => e.type === "chat.message" && /stop improving this task/.test(String(e.data.message)))).toBe(true);
+    expect(t2.some((e) => e.type === "run.stage" && e.data.stage === "specialist")).toBe(true);
+  }, 300_000);
+
+  it("never asks review questions under --yes", async () => {
+    const asked: UserQuestion[] = [];
+    const inter: Interaction = { ask: async (q) => { asked.push(q); return { questionId: q.id, text: "auto", approved: true, data: { mode: "auto" } }; } };
+    const r = await runPipeline({ request: "[worktype:writing] a haiku", config: cfg(), env: {}, mock: true, interaction: inter, outDir: path.join(tmp, "run-review-yes"), workspaceRoot: path.join(tmp, "ws-review-yes"), bus: new EventBus("review-2"), runId: "review-2", autoAnswer: true, review: ["plan", "crown"] });
+    expect(r.status, r.error).toBe("ok");
+    expect(asked.filter((q) => q.kind === "review-plan" || q.kind === "review-crown")).toEqual([]);
+  }, 120_000);
+});
+
+function llmTags(ev: RunEvent[]): string[] {
+  return ev.filter((e) => e.type === "llm.call").map((e) => String(e.data.tag));
+}

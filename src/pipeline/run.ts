@@ -51,6 +51,8 @@ export interface RunOptions {
   runId?: string;
   /** Answer clarifying questions automatically ("use your best judgement"). */
   autoAnswer?: boolean;
+  /** Human checkpoints: "plan" asks you to approve or amend the plan, "crown" asks at every crowned version. Skipped with autoAnswer. */
+  review?: ("plan" | "crown")[];
   reselect?: boolean;
   signal?: AbortSignal;
   /** Test hook: replace provider detection. */
@@ -175,6 +177,10 @@ interface TaskState {
   improveRounds: number;
   /** Per-file provenance of the current best (display only). */
   attribution: Map<string, FileAttribution>;
+  /** The user chose "stop here" at a crown checkpoint: no more improvement rounds for this task. */
+  userStop: boolean;
+  /** Extra improvement attempts the user granted at crown checkpoints. */
+  extraAttempts: number;
 }
 
 export async function runPipeline(opts: RunOptions, control: RunControl = new RunControl()): Promise<RunResult> {
@@ -206,6 +212,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
   if (opts.resumeFrom && !resumed) throw new Error(`No usable checkpoint.json in ${opts.resumeFrom}`);
   const checkpoint: Checkpoint = resumed ?? { version: 1, request: opts.request, done: [], updatedAt: "" };
   const saveCheckpoint = () => writeCheckpoint(outDir, checkpoint);
+  const reviewSet = new Set(opts.review ?? []);
   bus.emit("run.started", { request: opts.request, mock: opts.mock, resumedFrom: opts.resumeFrom, configSummary: { maxDiscussionRounds: cfg.pipeline.maxDiscussionRounds, stallLimit: cfg.pipeline.stallLimit, costCapUsd: cfg.cost.capUsd, search: cfg.search.provider } });
 
   try {
@@ -379,20 +386,37 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
     stage("plan");
     const wtList = [...workTypes.values()];
     const planRes = checkpoint.plan ? { json: { tasks: checkpoint.plan.tasks.map((t) => ({ ...t })), notes: checkpoint.plan.notes } as any } : await llm.callJson<Plan>({ member: lead, stage: "plan", system: P.planPrompt(lead.label, teamLabels(), wtList), messages: [textMessage("user", `Request: ${opts.request}\n\nSpec:\n${P.specText(spec)}`)], tag: "plan" }, (o) => (Array.isArray(o.tasks) && o.tasks.length ? undefined : "tasks must be a non-empty array"));
-    const plan: Plan = { tasks: [], notes: arr(planRes.json.notes) };
-    planRes.json.tasks.forEach((t: any, i: number) => {
-      const requested = String(t.workType ?? "");
-      let wtName = requested;
-      let note: string | undefined;
-      if (!workTypes.has(wtName)) {
-        wtName = closestWorkType(requested, t, workTypes);
-        note = `requested work type "${requested}" is not built; using "${wtName}" (limitation noted)`;
-        plan.notes.push(`Task ${t.id ?? i + 1}: ${note}`);
-      }
-      plan.tasks.push({ id: String(t.id ?? `t${i + 1}`), title: String(t.title ?? `Task ${i + 1}`), description: String(t.description ?? ""), workType: wtName, workTypeFallbackNote: note, acceptanceCriteria: arr(t.acceptanceCriteria), dependsOn: arr(t.dependsOn) });
-    });
+    const buildPlan = (json: any): Plan => {
+      const p: Plan = { tasks: [], notes: arr(json.notes) };
+      (json.tasks as any[]).forEach((t: any, i: number) => {
+        const requested = String(t.workType ?? "");
+        let wtName = requested;
+        let note: string | undefined;
+        if (!workTypes.has(wtName)) {
+          wtName = closestWorkType(requested, t, workTypes);
+          note = `requested work type "${requested}" is not built; using "${wtName}" (limitation noted)`;
+          p.notes.push(`Task ${t.id ?? i + 1}: ${note}`);
+        }
+        p.tasks.push({ id: String(t.id ?? `t${i + 1}`), title: String(t.title ?? `Task ${i + 1}`), description: String(t.description ?? ""), workType: wtName, workTypeFallbackNote: note, acceptanceCriteria: arr(t.acceptanceCriteria), dependsOn: arr(t.dependsOn) });
+      });
+      return p;
+    };
+    let plan: Plan = buildPlan(planRes.json);
     result.plan = plan;
     bus.emit("plan.written", { plan, resumed: !!checkpoint.plan }, { stage: "plan" });
+    // Human checkpoint: approve or amend the plan before any work starts.
+    if (!checkpoint.plan && reviewSet.has("plan") && !opts.autoAnswer) {
+      const a = await ask({ id: qid(), kind: "review-plan", text: "Review the plan. Answer \"ok\" to start, describe a change (e.g. \"split task 2 into UI and logic\"), or \"stop\".", tasks: plan.tasks.map((t) => ({ id: t.id, title: t.title, workType: t.workType, acceptanceCriteria: t.acceptanceCriteria })) });
+      const answer = a.text.trim();
+      if (/^stop\b/i.test(answer)) throw new RunStopped("stopped by the user at the plan review");
+      if (answer && !/^(ok|okay|yes|y|go|accept(ed)?|approve[d]?|looks good|lgtm)\.?$/i.test(answer)) {
+        const amended = await llm.callJson<Plan>({ member: lead, stage: "plan", system: P.planPrompt(lead.label, teamLabels(), wtList), messages: [textMessage("user", `Request: ${opts.request}\n\nSpec:\n${P.specText(spec)}\n\nYour current plan:\n${P.planText(plan.tasks)}\n\nThe user asks for this change to the plan: ${answer}\nReturn the complete revised plan.`)], tag: "plan-amend" }, (o) => (Array.isArray(o.tasks) && o.tasks.length ? undefined : "tasks must be a non-empty array"));
+        plan = buildPlan(amended.json);
+        plan.notes.push(`Amended at the user's request: ${answer}`);
+        result.plan = plan;
+        bus.emit("plan.written", { plan, amended: true, userAmendment: answer }, { stage: "plan" });
+      }
+    }
     if (!checkpoint.plan) {
       checkpoint.plan = plan;
       saveCheckpoint();
@@ -406,7 +430,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       const wt = task && workTypes.get(task.workType);
       if (!task || !wt) continue;
       const bestOk = d.bestSnapshotDir && fs.existsSync(d.bestSnapshotDir);
-      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map() };
+      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map(), userStop: false, extraAttempts: 0 };
       if (bestOk && d.bestTestRun) st.best = { version: d.bestVersion ?? 1, fromMemberId: "resumed", crownedAt: d.status, taskId: task.id, testRun: d.bestTestRun, snapshotDir: d.bestSnapshotDir!, reason: "resumed from checkpoint" };
       bus.emit("task.started", { task, resumed: true }, { taskId: task.id });
       bus.emit("task.finished", { taskId: task.id, status: d.status, summary: d.output.slice(0, 2000), resumed: true }, { taskId: task.id });
@@ -417,7 +441,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       if (done.some((d) => d.task.id === task.id)) continue;
       await control.gate();
       const wt = workTypes.get(task.workType)!;
-      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map() };
+      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0, attribution: new Map(), userStop: false, extraAttempts: 0 };
       bus.emit("task.started", { task }, { taskId: task.id });
       const priorWork = done.map((d) => `### ${d.task.title} (${d.wt.name})\n${d.output.slice(0, 6000)}`).join("\n\n");
       // Prior tasks' deliverables plus, once Step A is done, the current task's draft (the thing under review).
@@ -513,7 +537,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       }
 
       // ---- Step D: red team (code only, per work type)
-      if (wt.redTeam) {
+      if (wt.redTeam && !st.userStop) {
         stage("red-team", task.id);
         const attackers = live();
         const plan = planRedTeam(attackers);
@@ -723,6 +747,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         return parts.join("\n") || "(empty sandbox)";
       }
       async function improveUntilCrowned(instruction: string, items: string[], when: string) {
+        if (st.userStop) return;
         // Nothing to change (the team accepted the work as-is): do not burn improvement rounds.
         if (!items.length) {
           bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: `No changes were agreed ${when}; skipping the improvement round.`, rationale: "" }, { stage: "compete", taskId: task.id });
@@ -730,7 +755,8 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         }
         // "Review continues" until a candidate beats the best, bounded by the stall limit.
         let extra: string[] = [];
-        for (let attempt = 1; attempt <= Math.max(1, cfg.pipeline.stallLimit); attempt++) {
+        for (let attempt = 1; attempt <= Math.max(1, cfg.pipeline.stallLimit + st.extraAttempts); attempt++) {
+          if (st.userStop) return;
           const changed = await improveAll(instruction, [...items, ...extra]);
           if (!changed) {
             bus.emit("chat.message", { channel: "system", round: attempt, memberId: "", label: "engine", message: `Improvement attempt ${attempt} ${when} changed no files; keeping v${st.best?.version ?? 0}.`, rationale: "" }, { stage: "compete", taskId: task.id });
@@ -924,6 +950,17 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
             st.rerunCache.clear(); // later candidates compare against the new best
             crownedThisRound = true;
             bus.emit("best.crowned", { best: st.best, label: m.label }, { stage: "compete", taskId: task.id, memberId: m.id });
+            if (reviewSet.has("crown") && !opts.autoAnswer) {
+              const changedFiles = [...st.attribution.values()].filter((x) => x.sinceVersion === st.version).length;
+              const a = await ask({ id: qid(), kind: "review-crown", text: `${m.label}'s version was crowned as v${st.version} (${cmp.reason}). Accept and continue, keep improving, or stop improving this task here?`, taskId: task.id, version: st.version, label: m.label, reason: cmp.reason, changedFiles }, { taskId: task.id });
+              const choice = a.text.trim().toLowerCase();
+              if (choice.startsWith("stop")) {
+                st.userStop = true;
+                bus.emit("chat.message", { channel: "system", round: 0, memberId: "", label: "engine", message: `You chose to stop improving this task at v${st.version}; it continues to verification with this version.`, rationale: "" }, { stage: "compete", taskId: task.id });
+                break;
+              }
+              if (choice.startsWith("keep")) st.extraAttempts++;
+            }
           } else {
             bus.emit("best.rejected", { memberId: m.id, reason: cmp.reason, testRun: candRun }, { stage: "compete", taskId: task.id, memberId: m.id });
           }
