@@ -171,6 +171,8 @@ interface TaskState {
   rerunCache: Map<string, TestRun>;
   /** Tests seen flipping between identical runs; excluded from crowning comparisons. */
   flaky: Set<string>;
+  /** Improvement rounds so far (drives harvest folders and wildcard rotation). */
+  improveRounds: number;
 }
 
 export async function runPipeline(opts: RunOptions, control: RunControl = new RunControl()): Promise<RunResult> {
@@ -402,7 +404,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       const wt = task && workTypes.get(task.workType);
       if (!task || !wt) continue;
       const bestOk = d.bestSnapshotDir && fs.existsSync(d.bestSnapshotDir);
-      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set() };
+      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0 };
       if (bestOk && d.bestTestRun) st.best = { version: d.bestVersion ?? 1, fromMemberId: "resumed", crownedAt: d.status, taskId: task.id, testRun: d.bestTestRun, snapshotDir: d.bestSnapshotDir!, reason: "resumed from checkpoint" };
       bus.emit("task.started", { task, resumed: true }, { taskId: task.id });
       bus.emit("task.finished", { taskId: task.id, status: d.status, summary: d.output.slice(0, 2000), resumed: true }, { taskId: task.id });
@@ -413,7 +415,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       if (done.some((d) => d.task.id === task.id)) continue;
       await control.gate();
       const wt = workTypes.get(task.workType)!;
-      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set() };
+      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set(), improveRounds: 0 };
       bus.emit("task.started", { task }, { taskId: task.id });
       const priorWork = done.map((d) => `### ${d.task.title} (${d.wt.name})\n${d.output.slice(0, 6000)}`).join("\n\n");
       // Prior tasks' deliverables plus, once Step A is done, the current task's draft (the thing under review).
@@ -736,14 +738,65 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         }
         bus.emit("best.stalled", { taskId: task.id, attempts: cfg.pipeline.stallLimit, reason: `no candidate beat the current best in ${cfg.pipeline.stallLimit} attempt(s) ${when}; keeping v${st.best?.version ?? 0}` }, { stage: "compete", taskId: task.id });
       }
+      /** Save each non-best version's diff (on disk and as a prompt excerpt) before sandboxes are reset. */
+      async function harvestLosers(members: TeamMember[]): Promise<{ memberId: string; label: string; files: string[]; excerpt: string }[]> {
+        if (!st.best || !fs.existsSync(st.best.snapshotDir)) return [];
+        const out: { memberId: string; label: string; files: string[]; excerpt: string }[] = [];
+        let budget = 20_000;
+        for (const m of members) {
+          if (m.id === st.best.fromMemberId) continue;
+          let d: { files: string[]; diff: string };
+          try {
+            d = await sb.diff(st.best.snapshotDir, sb.sandboxDir(m.id));
+          } catch {
+            continue;
+          }
+          if (!d.files.length) continue;
+          const dir = path.join(workspaceRoot, runId, "harvest", task.id, `r${st.improveRounds}-${m.id}`);
+          try {
+            fs.mkdirSync(path.dirname(dir), { recursive: true });
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.cpSync(sb.sandboxDir(m.id), dir, { recursive: true, filter: (p) => !/[\\/](node_modules|\.git)([\\/]|$)/.test(p) });
+          } catch {
+            /* the diff in the event log is still kept */
+          }
+          const excerpt = d.diff.slice(0, Math.min(6000, Math.max(0, budget)));
+          budget -= excerpt.length;
+          out.push({ memberId: m.id, label: m.label, files: d.files, excerpt: excerpt + (d.diff.length > excerpt.length ? "\n…[diff truncated]" : "") });
+          bus.emit("harvest.saved", { memberId: m.id, files: d.files, dir: `<workspace>/harvest/${task.id}/r${st.improveRounds}-${m.id}`, round: st.improveRounds }, { stage: "do", taskId: task.id, memberId: m.id });
+        }
+        return out;
+      }
+      /** Rotate the wildcard over members that are not the best's author, preferring ones with a distinct version. */
+      function pickWildcard(members: TeamMember[], divergent: string[]): TeamMember | undefined {
+        const pool = members.filter((m) => m.id !== st.best?.fromMemberId);
+        if (!pool.length) return undefined;
+        const preferred = pool.filter((m) => divergent.includes(m.id));
+        const list = preferred.length ? preferred : pool;
+        return list[(st.improveRounds - 1) % list.length];
+      }
       /** Runs an improvement round for every live member; returns whether any sandbox actually changed. */
       async function improveAll(instruction: string, items: string[]): Promise<boolean> {
-        // Everyone starts the improvement round from the crowned best (or the lead's work when nothing is crowned yet).
-        if (st.best) sb.resetAllToBest(live().map((m) => m.id));
+        st.improveRounds++;
+        const members = live();
+        // Keep what the losing versions tried before they are overwritten (idea: harvest before reset).
+        const harvested = st.best && cfg.pipeline.harvest ? await harvestLosers(members) : [];
+        // One member keeps its own lineage so the team does not collapse onto a single design (wildcard).
+        const wildcard = st.best && cfg.pipeline.wildcard && members.length >= 3 ? pickWildcard(members, harvested.map((h) => h.memberId)) : undefined;
+        // Everyone else starts the improvement round from the crowned best (or the lead's work when nothing is crowned yet).
+        if (st.best) sb.resetAllToBest(members.filter((m) => m.id !== wildcard?.id).map((m) => m.id));
+        if (wildcard) bus.emit("chat.message", { channel: "system", round: st.improveRounds, memberId: wildcard.id, label: "engine", message: `${wildcard.label} is this round's wildcard: it keeps its own version instead of being reset to v${st.best?.version}.`, rationale: "" }, { stage: "do", taskId: task.id });
+        const harvestText = harvested.length
+          ? `\nUnadopted work from the previous round (other agents' versions that were not crowned; adopt any part that helps, tests decide):\n${harvested.map((h) => `- ${h.label} changed ${h.files.slice(0, 12).join(", ")}${h.files.length > 12 ? " …" : ""}:\n${h.excerpt}`).join("\n")}`
+          : "";
         let anyChanged = false;
-        await settle(live().map(async (m) => {
+        await settle(members.map(async (m) => {
+          const holds = m.id === wildcard?.id
+            ? `your own version from the previous round (you are the wildcard: continue your own approach or converge on the best v${st.best?.version}, your call)`
+            : st.best ? `the current best version v${st.best.version}` : `a copy of ${lead.label}'s work`;
+          const others = harvestText && harvested.some((h) => h.memberId !== m.id) ? harvestText : "";
           try {
-            const { json, result: r } = await llm.callJson<any>({ member: m, stage: "do", taskId: task.id, system: sys(m, "do", common(m, `IMPROVEMENT ROUND. Your sandbox currently holds ${st.best ? `the current best version v${st.best.version}` : `a copy of ${lead.label}'s work`}. Instruction: ${instruction}.\nItems:\n${items.map((i) => `- ${i}`).join("\n") || "- (use your own judgement)"}\nKeep or add tests so improvements are measurable. Do not remove passing tests.${st.flaky.size ? `\nFlaky tests (their result changes between identical runs, so they are ignored when crowning; fixing them is worthwhile): ${[...st.flaky].slice(0, 20).join("; ")}` : ""}`)), messages: [textMessage("user", "Improve your version now.")], tools: toolsFor(wt), toolCtx: toolCtx(m, task.id, wt), tag: `improve/${m.label}`, signal });
+            const { json, result: r } = await llm.callJson<any>({ member: m, stage: "do", taskId: task.id, system: sys(m, "do", common(m, `IMPROVEMENT ROUND. Your sandbox currently holds ${holds}.${others} Instruction: ${instruction}.\nItems:\n${items.map((i) => `- ${i}`).join("\n") || "- (use your own judgement)"}\nKeep or add tests so improvements are measurable. Do not remove passing tests.${st.flaky.size ? `\nFlaky tests (their result changes between identical runs, so they are ignored when crowning; fixing them is worthwhile): ${[...st.flaky].slice(0, 20).join("; ")}` : ""}`)), messages: [textMessage("user", "Improve your version now.")], tools: toolsFor(wt), toolCtx: toolCtx(m, task.id, wt), tag: `improve/${m.label}`, signal });
             bus.emit("chat.message", { channel: "lead", round: st.version + 1, memberId: m.id, label: m.label, message: `Improvement: ${json.summary ?? ""}`, rationale: String(json.rationale ?? ""), reasoningText: r.reasoningText, filesChanged: json.files_changed }, { stage: "do", taskId: task.id, memberId: m.id });
             if ((await emitDiff(m)) > 0) anyChanged = true;
           } catch (e) {

@@ -176,6 +176,8 @@ export function defaultConfig(): EngineConfig {
       flakeRerun: true,
       flakeRerunMaxSec: 120,
       redTeamMaxTargets: 0,
+      harvest: true,
+      wildcard: true,
       maxToolIterations: 25,
       contextBudgetTokens: 60_000,
       minMembers: 2,

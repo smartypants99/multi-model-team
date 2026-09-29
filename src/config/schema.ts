@@ -48,6 +48,10 @@ export interface EngineConfig {
     flakeRerunMaxSec: number;
     /** Red team: at most this many targets per attacker (0 = every distinct version). */
     redTeamMaxTargets: number;
+    /** Before sandboxes are reset to the best, keep each losing version's diff and show it in the next improvement prompt. */
+    harvest: boolean;
+    /** With 3+ members, one member (rotating) keeps its own lineage instead of being reset to the best. */
+    wildcard: boolean;
     maxToolIterations: number;
     /** Tokens after which older discussion rounds are summarised. */
     contextBudgetTokens: number;

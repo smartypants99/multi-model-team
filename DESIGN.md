@@ -356,6 +356,15 @@ independent.
   scores are recorded but never override tests.
 - **Stall limit.** After `stallLimit` consecutive rounds with no new best,
   keep the current best, log why, move on.
+- **Harvest and wildcard.** Before sandboxes are reset to the best for an
+  improvement round, every version that differs from the best is copied to
+  `<workspace>/harvest/<task>/r<n>-<member>` and its diff is shown in the next
+  improvement prompt as "unadopted work", so good ideas in losing versions are
+  not destroyed. With three or more members, one member per round (rotating,
+  never the best's author, preferring divergent versions) keeps its own
+  lineage instead of being reset, which preserves diversity; its candidate
+  still has to win the competition like any other. Both are on by default
+  (`pipeline.harvest`, `pipeline.wildcard`).
 - **Measurement and flakes.** All candidates' suites are measured in
   parallel (each in its own sandbox; the best's fairness re-runs use a
   per-candidate copy), then crowns are decided serially in a fixed order
