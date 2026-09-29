@@ -342,6 +342,10 @@ export interface TestRun {
   failed: number;
   rawOutput: string;
   command: string;
+  /** Wall-clock time of the suite run. */
+  durationMs?: number;
+  /** Tests excluded from this comparison because they flipped between identical runs. */
+  flaky?: string[];
 }
 
 export interface BestVersion {

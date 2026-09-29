@@ -33,7 +33,7 @@ import { fileTools, runCommandTool } from "../tools/sandbox-tools.js";
 import { screenshotTool } from "../tools/screenshot.js";
 import { Llm, MemberFailedError, textMessage, type CallResult } from "./llm.js";
 import { runDiscussion, ANTI_GROUPTHINK_RULES } from "./discussion.js";
-import { detectTestCommand, parseTestOutput, makeTestRun, compareRuns } from "./tests.js";
+import { detectTestCommand, parseTestOutput, makeTestRun, decideWithFlakeCheck } from "./tests.js";
 import * as P from "./prompts.js";
 
 export interface RunOptions {
@@ -169,6 +169,8 @@ interface TaskState {
   agreedChanges: string[];
   /** Re-runs of the current best on changed test suites, keyed by suite hash. */
   rerunCache: Map<string, TestRun>;
+  /** Tests seen flipping between identical runs; excluded from crowning comparisons. */
+  flaky: Set<string>;
 }
 
 export async function runPipeline(opts: RunOptions, control: RunControl = new RunControl()): Promise<RunResult> {
@@ -400,7 +402,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       const wt = task && workTypes.get(task.workType);
       if (!task || !wt) continue;
       const bestOk = d.bestSnapshotDir && fs.existsSync(d.bestSnapshotDir);
-      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map() };
+      const st: TaskState = { task, wt, leadOutput: d.output, leadRationale: "", verifications: [], critiques: [], version: d.bestVersion ?? 0, stalls: 0, output: d.output, resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set() };
       if (bestOk && d.bestTestRun) st.best = { version: d.bestVersion ?? 1, fromMemberId: "resumed", crownedAt: d.status, taskId: task.id, testRun: d.bestTestRun, snapshotDir: d.bestSnapshotDir!, reason: "resumed from checkpoint" };
       bus.emit("task.started", { task, resumed: true }, { taskId: task.id });
       bus.emit("task.finished", { taskId: task.id, status: d.status, summary: d.output.slice(0, 2000), resumed: true }, { taskId: task.id });
@@ -411,7 +413,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
       if (done.some((d) => d.task.id === task.id)) continue;
       await control.gate();
       const wt = workTypes.get(task.workType)!;
-      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map() };
+      const st: TaskState = { task, wt, leadOutput: "", leadRationale: "", verifications: [], critiques: [], version: 0, stalls: 0, output: "", resolution: "", agreedChanges: [], rerunCache: new Map(), flaky: new Set() };
       bus.emit("task.started", { task }, { taskId: task.id });
       const priorWork = done.map((d) => `### ${d.task.title} (${d.wt.name})\n${d.output.slice(0, 6000)}`).join("\n\n");
       // Prior tasks' deliverables plus, once Step A is done, the current task's draft (the thing under review).
@@ -679,7 +681,7 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         let anyChanged = false;
         await settle(live().map(async (m) => {
           try {
-            const { json, result: r } = await llm.callJson<any>({ member: m, stage: "do", taskId: task.id, system: sys(m, "do", common(m, `IMPROVEMENT ROUND. Your sandbox currently holds ${st.best ? `the current best version v${st.best.version}` : `a copy of ${lead.label}'s work`}. Instruction: ${instruction}.\nItems:\n${items.map((i) => `- ${i}`).join("\n") || "- (use your own judgement)"}\nKeep or add tests so improvements are measurable. Do not remove passing tests.`)), messages: [textMessage("user", "Improve your version now.")], tools: toolsFor(wt), toolCtx: toolCtx(m, task.id, wt), tag: `improve/${m.label}`, signal });
+            const { json, result: r } = await llm.callJson<any>({ member: m, stage: "do", taskId: task.id, system: sys(m, "do", common(m, `IMPROVEMENT ROUND. Your sandbox currently holds ${st.best ? `the current best version v${st.best.version}` : `a copy of ${lead.label}'s work`}. Instruction: ${instruction}.\nItems:\n${items.map((i) => `- ${i}`).join("\n") || "- (use your own judgement)"}\nKeep or add tests so improvements are measurable. Do not remove passing tests.${st.flaky.size ? `\nFlaky tests (their result changes between identical runs, so they are ignored when crowning; fixing them is worthwhile): ${[...st.flaky].slice(0, 20).join("; ")}` : ""}`)), messages: [textMessage("user", "Improve your version now.")], tools: toolsFor(wt), toolCtx: toolCtx(m, task.id, wt), tag: `improve/${m.label}`, signal });
             bus.emit("chat.message", { channel: "lead", round: st.version + 1, memberId: m.id, label: m.label, message: `Improvement: ${json.summary ?? ""}`, rationale: String(json.rationale ?? ""), reasoningText: r.reasoningText, filesChanged: json.files_changed }, { stage: "do", taskId: task.id, memberId: m.id });
             if ((await emitDiff(m)) > 0) anyChanged = true;
           } catch (e) {
@@ -705,44 +707,71 @@ export async function runPipeline(opts: RunOptions, control: RunControl = new Ru
         bus.emit("command.run", { memberId, command: suite.command, cwd: dir, exitCode: res.exitCode, timedOut: res.timedOut, killedReason: res.killedReason, durationMs: res.durationMs }, { stage: "compete", taskId: task.id, memberId });
         return makeTestRun(suite.command, hash, res, parseTestOutput(suite.kind, res));
       }
+      /** The current best measured on `suite` as it exists in `memberId`'s sandbox (fairness re-run when the suite changed). */
+      async function bestOnSuiteOf(memberId: string, suite: NonNullable<ReturnType<typeof detectTestCommand>>, force = false): Promise<TestRun | undefined> {
+        if (!st.best || !st.bestRun) return undefined;
+        const candHash = sb.hashFiles(sb.sandboxDir(memberId), suite.suitePatterns);
+        if (!force && candHash === st.bestRun.suiteHash) return st.bestRun;
+        // Each candidate gets its own re-run sandbox, so parallel measurements never collide.
+        const bestTmp = `best-rerun-${memberId}`;
+        sb.reseed(bestTmp, st.best.snapshotDir);
+        if (candHash !== st.bestRun.suiteHash) {
+          for (const f of sb.listFiles(memberId).filter((f) => f.type === "file" && suite.suitePatterns.some((p) => globMatch(p, f.path)))) {
+            try { sb.writeFile(bestTmp, f.path, sb.readFileFrom(memberId, f.path)); } catch { /* ignore */ }
+          }
+        }
+        const rerunHash = sb.hashFiles(sb.sandboxDir(bestTmp), suite.suitePatterns);
+        if (!force) {
+          const cached = st.rerunCache.get(rerunHash);
+          if (cached) return cached;
+        }
+        const rerun = await runTests(bestTmp, suite);
+        if (!force) st.rerunCache.set(rerunHash, rerun);
+        bus.emit("tests.run", { memberId: st.best.fromMemberId, testRun: rerun, candidate: false, note: force ? "current best re-run to check for flaky tests" : "current best re-run on the updated test suite" }, { stage: "compete", taskId: task.id, memberId: st.best.fromMemberId });
+        return rerun;
+      }
       async function compete(when: string) {
         stage("compete", task.id);
         if (wt.scoring.type !== "tests") return;
+        const testCommand = wt.scoring.command;
         let crownedThisRound = false;
-        for (const m of live()) {
+        const candidates = live();
+        // 1. Measure: every candidate's suite runs in its own sandbox; in parallel unless configured otherwise.
+        const measureOne = async (m: TeamMember) => {
           await control.gate();
-          const dir = sb.sandboxDir(m.id);
-          const suite = detectTestCommand(dir, wt.scoring.command);
-          if (!suite) {
+          const suite = detectTestCommand(sb.sandboxDir(m.id), testCommand);
+          if (!suite) return { m, suite: undefined, run: undefined };
+          const run = await runTests(m.id, suite);
+          bus.emit("tests.run", { memberId: m.id, testRun: run, candidate: true }, { stage: "compete", taskId: task.id, memberId: m.id });
+          return { m, suite, run };
+        };
+        const measured = cfg.pipeline.parallelTests ? await settle(candidates.map(measureOne)) : await (async () => { const out = []; for (const m of candidates) out.push(await measureOne(m)); return out; })();
+        // 2. Decide: serially, in a fixed order, against whatever is the best at that moment.
+        for (const { m, suite, run } of measured) {
+          await control.gate();
+          if (!suite || !run) {
             bus.emit("best.rejected", { memberId: m.id, reason: "no test suite detected in the candidate", testRun: null }, { stage: "compete", taskId: task.id, memberId: m.id });
             continue;
           }
-          const candRun = await runTests(m.id, suite);
-          bus.emit("tests.run", { memberId: m.id, testRun: candRun, candidate: true }, { stage: "compete", taskId: task.id, memberId: m.id });
-          let bestForCompare = st.bestRun;
-          // Fairness: if the suite changed, re-run the current best on the new suite.
-          if (st.best && st.bestRun && candRun.suiteHash !== st.bestRun.suiteHash) {
-            const bestTmp = "best-rerun";
-            sb.reseed(bestTmp, st.best.snapshotDir);
-            for (const f of sb.listFiles(m.id).filter((f) => f.type === "file" && suite.suitePatterns.some((p) => globMatch(p, f.path)))) {
-              try { sb.writeFile(bestTmp, f.path, sb.readFileFrom(m.id, f.path)); } catch { /* ignore */ }
-            }
-            const rerunHash = sb.hashFiles(sb.sandboxDir(bestTmp), suite.suitePatterns);
-            let rerun = st.rerunCache.get(rerunHash);
-            if (!rerun) {
-              rerun = await runTests(bestTmp, suite);
-              st.rerunCache.set(rerunHash, rerun);
-              bus.emit("tests.run", { memberId: st.best.fromMemberId, testRun: rerun, candidate: false, note: "current best re-run on the updated test suite" }, { stage: "compete", taskId: task.id, memberId: st.best.fromMemberId });
-            }
-            bestForCompare = rerun;
+          const bestNow = await bestOnSuiteOf(m.id, suite);
+          const slow = Math.max(run.durationMs ?? 0, bestNow?.durationMs ?? 0) > cfg.pipeline.flakeRerunMaxSec * 1000;
+          const cmp = await decideWithFlakeCheck(bestNow, run, {
+            knownFlaky: st.flaky,
+            allowRerun: cfg.pipeline.flakeRerun && !slow,
+            rerun: async () => ({ cand: await runTests(m.id, suite), best: await bestOnSuiteOf(m.id, suite, true) }),
+          });
+          if (cmp.newlyFlaky.length) {
+            for (const f of cmp.newlyFlaky) st.flaky.add(f);
+            bus.emit("tests.flaky", { memberId: m.id, tests: cmp.newlyFlaky, note: "these tests changed result between identical runs and are ignored when crowning" }, { stage: "compete", taskId: task.id, memberId: m.id });
           }
-          const cmp = compareRuns(bestForCompare, candRun);
+          const candRun = cmp.cand;
           if (cmp.crown) {
             st.version++;
             const snap = sb.snapshot(m.id, st.version);
             sb.promoteToBest(m.id);
             st.best = { version: st.version, fromMemberId: m.id, crownedAt: new Date().toISOString(), taskId: task.id, testRun: candRun, snapshotDir: snap, reason: `${when}: ${cmp.reason}` };
             st.bestRun = candRun;
+            st.rerunCache.clear(); // later candidates compare against the new best
             crownedThisRound = true;
             bus.emit("best.crowned", { best: st.best, label: m.label }, { stage: "compete", taskId: task.id, memberId: m.id });
           } else {

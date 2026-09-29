@@ -40,6 +40,12 @@ export interface EngineConfig {
     maxDiscussionRounds: number;
     maxMeetingRounds: number;
     stallLimit: number;
+    /** Measure all candidates' test suites at the same time (decisions stay serial and ordered). */
+    parallelTests: boolean;
+    /** When a candidate and the best disagree on a test, re-run both once and ignore tests that flip. */
+    flakeRerun: boolean;
+    /** Skip the flake re-run when a suite takes longer than this (seconds). */
+    flakeRerunMaxSec: number;
     maxToolIterations: number;
     /** Tokens after which older discussion rounds are summarised. */
     contextBudgetTokens: number;
